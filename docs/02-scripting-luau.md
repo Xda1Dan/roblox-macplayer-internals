@@ -223,6 +223,53 @@ operations:
 No vanilla `luaL_*` surface and zero `getgenv` occurrences: the engine speaks
 to Luau through its own C++ API.
 
+## Luau-side findings from the supplied function map
+
+The supplied RVAs were checked against the binary's linker function-start
+table. These entries land exactly on function starts for this build:
+
+| Supplied RVA | Verified role |
+|---|---|
+| `0x299fd5b` | `lua_newstate`-shaped state allocation/initialization; accepts an allocator callback and allocator context, initializes the state, then runs protected initialization |
+| `0x29a9f36` | `loadsafe`-shaped protected bytecode load; checks stack/memory state, calls the protected loader, restores the stack cursor, and reports memory failure |
+| `0x29adfd3` | `luau_execute` entry exists at the exact address, but this build's decompiler could not recover its body; do not infer its calling convention from the label alone |
+| `0x15566d6` | `ScriptContextResume`; logs `Resuming script`, checks shutdown/deadline and C-stack limits, then performs the VM resume path |
+| `0x14cf74a` | `task.wait`; rejects non-yieldable threads and AuroraScript contexts, marks the coroutine waiting, schedules a timed resume, and returns through the VM resume machinery |
+| `0x55d5e74` | ScriptContext facet accessor: if the facet index is below 3 it returns `context+0xdc0`; otherwise it raises `Invalid Facet Access` |
+
+The `ScriptContextResume` body exposes several real VM guardrails:
+
+* It logs the pending script name before resume.
+* It rejects a C stack depth above 200 with `C stack overflow`.
+* It refuses to run after the shutdown deadline.
+* It can refresh execution metadata from the DataModel/context before resume.
+* It records first-resume timing and script execution time.
+
+`task.wait` is not implemented as a blocking OS sleep. Its body marks the
+current coroutine as waiting, packages a resume event/deadline, schedules it
+through ScriptContext's waiting machinery, and returns control to the VM. This
+is the native reason a Luau `task.wait()` yields without blocking the worker
+thread.
+
+### Correct interpretation of the offset header
+
+The header is a useful symbol/offset index, but its names are analyst labels,
+not proof of wrapper semantics. In particular:
+
+* `GetGlobalState = 0x55d5e74` should be renamed to something like
+  `ScriptContextFacetAccessor` for this binary.
+* `task.wait = 0x14cf74a` is behaviorally confirmed.
+* `task.spawn = 0x14cff67` currently lands in a small task-library setup/helper
+  body; its exact public wrapper relationship still needs a caller trace.
+* `luau_execute` is an exact function start, but its calling convention/body
+  is unresolved because the decompiler failed on that highly optimized VM
+  routine.
+
+This distinction matters when reconstructing a legitimate in-process engine:
+use public Luau APIs and engine-owned ScriptContext interfaces for execution;
+do not treat a label in an offset header as a stable ABI or as permission to
+inject into or bypass another process.
+
 ## Native → Lua event paths (observed bodies)
 
 * `EmbeddedWebView.notifyLuaFocusedIfNeeded` (`ram:0x10000cdd2`): builds

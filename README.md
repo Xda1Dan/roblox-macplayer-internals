@@ -94,6 +94,15 @@ The native admission predicate at `ram:0x10142a7a6` separates **RunContext**,
 script's service/ancestry, DataModel state, and special plugin/core branches
 are checked as well. Lua does not assign itself a higher execution level.
 
+On the Luau side, the supplied map was validated against exact function
+starts. `lua_newstate` (`0x299fd5b`), the protected load boundary
+(`0x29a9f36`), `ScriptContextResume` (`0x15566d6`), and `task.wait`
+(`0x14cf74a`) all match real entry points. `task.wait` marks the coroutine
+waiting and schedules a timed resume; it does not block an OS thread.
+`ScriptContextResume` checks pending-script state, shutdown deadlines, and a
+C-stack limit before resuming. The header's `GetGlobalState` label at
+`0x55d5e74` is more accurately a ScriptContext facet accessor in this build.
+
 ModuleScript `require` is stateful as well. The native path at
 `ram:0x10158dd88` checks security context, tracks per-VM module state, detects
 circular dependencies, rejects destroyed modules, and requires exactly one

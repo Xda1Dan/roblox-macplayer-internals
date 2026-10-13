@@ -54,6 +54,24 @@ private:
     lua_State* thread_; // coroutine stack sharing global_State
 };
 
+enum class CoroutineStatus { Running, Suspended, Waiting, Completed, Failed };
+
+// Engine-owned task.wait shape: schedule a wake deadline and return control
+// to the VM. It is not an OS sleep and must only run on a yieldable thread.
+struct WaitRequest {
+    double seconds = 0.0;
+    double wakeAt = 0.0;
+    CoroutineStatus status = CoroutineStatus::Running;
+};
+
+inline bool scheduleTaskWait(WaitRequest& request, double now) {
+    if (request.status != CoroutineStatus::Running)
+        return false;
+    request.wakeAt = now + request.seconds;
+    request.status = CoroutineStatus::Waiting;
+    return true;
+}
+
 // Compile-then-load boundary with a verification hook where the player's
 // "Bytecode Auth Check" lives (before luau_load ever sees the bytes).
 inline int verifiedLoad(lua_State* L, const char* chunkName,
