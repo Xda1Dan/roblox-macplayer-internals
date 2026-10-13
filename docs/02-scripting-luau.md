@@ -93,6 +93,28 @@ retains shared references, derives execution flags from the script and current
 context, and stores inherited limits/identity data. The exact field meanings
 are not stable enough to publish as fixed offsets.
 
+### Native `require` behavior
+
+The body at `ram:0x10158dd88` is a real ModuleScript require path. Before
+loading it checks the caller/module security contexts and emits the observed
+errors for incompatible RobloxScript/non-RobloxScript combinations. It also
+handles special `.config` modules, attaches the module to the per-VM state,
+and branches on module state rather than blindly executing every call.
+
+The state handling includes:
+
+* already-loaded modules returning their cached result;
+* loading modules participating in a cycle, with a diagnostic requiring
+  `export` instead of `return` for circular dependencies;
+* destroyed module references failing with `Requested module has been
+  destroyed and can no longer be required`;
+* load failures producing `Requested module experienced an error while
+  loading`;
+* successful modules being required to return exactly one value.
+
+This is a stateful per-VM module cache, not a simple filesystem-style
+`require(path)` operation.
+
 ### Waiting-script pseudocode
 
 ```cpp

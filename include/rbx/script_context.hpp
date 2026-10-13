@@ -65,6 +65,57 @@ private:
 // Script instance kinds observed in the binary.
 enum class ScriptKind { Script, LocalScript, ModuleScript, CoreScript };
 
+enum class ModuleState {
+    Unloaded,
+    Loading,
+    Loaded,
+    Failed,
+    Destroyed,
+};
+
+struct ModuleResult {
+    ModuleState state = ModuleState::Unloaded;
+    std::shared_ptr<const Tuple> value; // successful require returns one value
+    std::string error;
+};
+
+// Per-VM state is intentionally separate from the ModuleScript instance.
+// The native path caches results, detects cycles, and invalidates destruction.
+class ModulePerVmState {
+public:
+    ModuleResult result;
+    bool loadingOnCurrentStack = false;
+
+    bool beginLoad() {
+        if (result.state == ModuleState::Destroyed ||
+            result.state == ModuleState::Loaded)
+            return false;
+        if (result.state == ModuleState::Loading) {
+            loadingOnCurrentStack = true;
+            return false;
+        }
+        result.state = ModuleState::Loading;
+        return true;
+    }
+
+    void complete(Tuple value) {
+        result.value = std::make_shared<const Tuple>(std::move(value));
+        result.state = ModuleState::Loaded;
+        loadingOnCurrentStack = false;
+    }
+
+    void fail(std::string message) {
+        result.error = std::move(message);
+        result.state = ModuleState::Failed;
+        loadingOnCurrentStack = false;
+    }
+
+    void destroy() {
+        result.value.reset();
+        result.state = ModuleState::Destroyed;
+    }
+};
+
 struct ScriptOptions {
     ScriptKind kind = ScriptKind::Script;
     std::string runContext; // "Server" | "Client" | "Plugin" | "Legacy"

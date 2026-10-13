@@ -64,3 +64,37 @@ Each frame the scheduler runs, among others:
 
 `include/rbx/scheduler.hpp` + `src/jobqueue_demo.cpp` model the
 mutex/shard/wake discipline with worker threads.
+
+## Job execution and node allocation
+
+The job-start wrapper at `ram:0x102eec6da` marks a job active, logs its
+arbiter/start timestamp, then invokes the virtual step at vtable offset
+`+0x10`. This confirms that job execution is polymorphic: the scheduler does
+not contain a large switch over every job type.
+
+The allocator at `ram:0x102ee3136` obtains a free node from a scheduler-owned
+pool, copies the job's shared state with atomic reference-count increments,
+updates a deadline/priority-like atomic value, and publishes the node through
+an indexed table using compare/exchange-style locking. Exhaustion is a hard
+diagnostic: `Out of job nodes. Check for job leaks and/or increase the
+FInt::TaskSchedulerMaxNumOfJobs value`.
+
+The diagnostic routine at `ram:0x102ee6a60` walks the scheduler's active job
+range and prints each job's name, state, and elapsed seconds. The binary also
+contains explicit limits for maximum jobs, maximum arbiters, job deadlines,
+thread counts, stack sizes, and per-cycle task budgets.
+
+The current C++ example intentionally uses `std::function` queues rather than
+pretending to reproduce the private node-table offsets. The observed model is:
+
+```cpp
+JobNode* node = nodePool.acquire();       // bounded; exhaustion is fatal
+node->job = sharedJob;
+node->deadline = job->deadline();
+arbiter.publish(node);                    // atomic publication
+worker:
+    node = arbiter.next();
+    node->active = true;
+    node->job->step(stats);               // virtual +0x10-shaped dispatch
+    nodePool.release(node);
+```

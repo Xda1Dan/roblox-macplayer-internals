@@ -88,6 +88,11 @@ handoff, and shared ownership across callbacks. The waiting-script bodies at
 `ram:0x1015a8d94` and `ram:0x1015a9249` claim an atomic resumption flag, drain
 a bounded number of waiters, observe a deadline, and release each waiter.
 
+ModuleScript `require` is stateful as well. The native path at
+`ram:0x10158dd88` checks security context, tracks per-VM module state, detects
+circular dependencies, rejects destroyed modules, and requires exactly one
+returned value.
+
 ### RakNet is transport, not the replication model
 
 The player contains RakNet types such as `RakPeer`, `RakPeerInterface`,
@@ -120,6 +125,10 @@ maintenance all become scheduled work. The observed submission chain is:
 
 `0x104545ba0` grows and copies a circular 0x80-byte record buffer; it is not
 an open-addressing hash table.
+
+Job execution is polymorphic: `ram:0x102eec6da` marks a job active and calls
+its virtual step function. `ram:0x102ee3136` allocates bounded job nodes and
+publishes them atomically; node exhaustion is a fatal scheduler diagnostic.
 
 ## Original C++ examples
 
