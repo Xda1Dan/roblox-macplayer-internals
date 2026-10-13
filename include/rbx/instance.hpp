@@ -42,7 +42,15 @@ class ServiceProvider : public Instance {
 public:
     // Services are children looked up by class name, e.g. "Workspace".
     template <typename T>
-    std::shared_ptr<T> getService();
+    std::shared_ptr<T> getService() {
+        for (auto& c : children_)
+            if (auto t = std::dynamic_pointer_cast<T>(c)) return t;
+        return nullptr;
+    }
+    template <typename T>
+    void addService(std::shared_ptr<T> svc) {
+        addChild(std::static_pointer_cast<Instance>(svc));
+    }
 };
 
 } // namespace rbx

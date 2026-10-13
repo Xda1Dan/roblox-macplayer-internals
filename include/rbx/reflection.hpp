@@ -43,6 +43,8 @@ struct EventDescriptor {
     std::string name;
     using Slot = std::function<void(const Tuple&)>;
     std::vector<Slot> connections; // Connect/Disconnect/Fire
+    EventDescriptor() = default;
+    EventDescriptor(std::string n) : name(std::move(n)) {}
 };
 
 struct EnumDescriptor {

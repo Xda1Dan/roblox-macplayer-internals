@@ -2,12 +2,15 @@ CXX ?= g++
 CXXFLAGS ?= -std=c++17 -O1 -Wall -Wextra -Iinclude
 BUILD ?= build
 
-DEMOS = reflection_demo jobqueue_demo sso_string_demo
+DEMOS = reflection_demo jobqueue_demo sso_string_demo datamodel_demo
 
 all: $(addprefix $(BUILD)/,$(DEMOS))
 
 $(BUILD)/%: src/%.cpp | $(BUILD)
 	$(CXX) $(CXXFLAGS) $< -o $@
+
+$(BUILD)/datamodel_demo: src/datamodel_demo.cpp src/descriptors.cpp | $(BUILD)
+	$(CXX) $(CXXFLAGS) src/datamodel_demo.cpp src/descriptors.cpp -o $@
 
 $(BUILD):
 	mkdir -p $(BUILD)

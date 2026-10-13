@@ -1,7 +1,7 @@
-# 05 — ObjC bridge (63 classes, parsed from `__objc_classlist`)
+# 05 — ObjC bridge (63 classes, from `__objc_classlist`)
 
-Parsed with `ObjCDump.java` (pure data reads, no disassembly). Method IMPs are
-`ram:` addresses; several are decompiled (see ledger).
+Read from the class-list metadata (pure data). Method IMPs are
+`ram:` addresses; ✅ marks analyzed functions (see ledger).
 
 ## App / game flow
 
@@ -50,4 +50,4 @@ Parsed with `ObjCDump.java` (pure data reads, no disassembly). Method IMPs are
   `ImageCaptureDeviceManagerImpl`, `BlockButtonActionHandler`,
   `OSXLocalStorageManager`, `WebViewOpenParameters`.
 
-✅ = decompiled in this repo's research (see ledger for findings).
+✅ = analyzed (see ledger for findings).

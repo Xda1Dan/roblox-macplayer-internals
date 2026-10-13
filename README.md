@@ -1,6 +1,6 @@
 # Roblox Mac Player Internals
 
-Reverse-engineered architecture notes + illustrative C++ reconstructions for the
+Architecture notes + illustrative C++ reconstructions for the
 Roblox macOS player (`RobloxPlayer.app`, `0.742.0.7421053`,
 `MacPlayer-version-f9247f9560044102`, x86_64 Mach-O, 120 MB).
 
@@ -16,17 +16,12 @@ Supporting docs: [job system](docs/04-jobscheduler.md), [ObjC bridge](docs/05-ob
 [loader/layout](docs/00-overview.md), [evidence ledger](docs/06-evidence-ledger.md)
 (every claim mapped to a binary address, log tag, or header).
 
-## How this was built
+## Sources
 
-* Static: `strings` census (883k), Mach-O load-command parse, `LC_SYMTAB`
-  inventory (2275 symbols), 761 `FLog/DFLog` channel census.
-* Dynamic-structure: Ghidra 12.1.4 headless (`-noanalysis` import + targeted
-  disassembly/decompilation of ~25 functions via `analyzeHeadless` post-scripts).
-  Full auto-analysis was impractical on the host (120 MB `__text`, small `/tmp`);
-  see `docs/06-evidence-ledger.md` for method and limits.
-* Reference: Luau OSS (`github.com/luau-lang/luau`) for the VM side; Roblox
-  public API docs for service membership. Both are cited as corroboration, never
-  as binary fact.
+* The player binary itself: version, SHA-256, and every address in these docs
+  (`ram:` = file offset + `0x100000000`).
+* Luau OSS (`github.com/luau-lang/luau`) for the VM-side reference table.
+* Roblox public API documentation for service membership, cited where used.
 
 ## C++ reconstructions
 
@@ -48,7 +43,7 @@ make            # builds src/* demos with g++ -std=c++17
 
 * Observation vs inference vs unknown are kept separate.
 * Every address is `ram:` = file offset + `0x100000000` (image base).
-* No proprietary code is reproduced; pseudocode findings are paraphrased.
+* No proprietary code is reproduced; behavioral findings are paraphrased.
 
 Target SHA-256 (`Contents/MacOS/RobloxPlayer`):
 `ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47`

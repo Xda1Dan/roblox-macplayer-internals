@@ -1,9 +1,9 @@
 # 03 — Networking + replication
 
-Architecture from channel census (`[DFLog::…]`/`[FLog::…]`), strings, and
-decompiled dispatch helpers. Code addresses for the inner replicator are still
-locked behind missing xrefs (RBX symbols are visibility-hidden); the shape
-below is string- + channel-observed unless noted.
+Architecture from log channels, the string table, and analyzed dispatch
+helpers. Code addresses for the inner replicator are still unmapped
+(RBX symbols are visibility-hidden); the shape below is observed in
+channels and strings unless noted.
 
 ## Layers, outside in
 
