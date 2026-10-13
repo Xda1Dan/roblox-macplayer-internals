@@ -109,6 +109,11 @@ Roblox binding registration → `_G`/sandbox configuration → VM collection.
 The state is created once per VM collection, not once per script; scripts use
 execution threads from that collection.
 
+The public `lua_pcall` name is absent from the binary, but protected execution
+is not absent: `luaB_pcall` (`0x10298b913`), `luaB_pcallrun`
+(`0x10298b946`), `luaD_rawrunprotected` (`0x102995084`), `luaD_throw`, and
+`luaG_runerror` are all present as exact Luau function starts.
+
 ModuleScript `require` is stateful as well. The native path at
 `ram:0x10158dd88` checks security context, tracks per-VM module state, detects
 circular dependencies, rejects destroyed modules, and requires exactly one

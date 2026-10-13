@@ -223,6 +223,26 @@ operations:
 No vanilla `luaL_*` surface and zero `getgenv` occurrences: the engine speaks
 to Luau through its own C++ API.
 
+### Is `lua_pcall` present?
+
+The exact public symbol/name `lua_pcall` is not present in the shipped Mach-O
+symbol/string inventory. That does **not** mean protected calls were removed.
+The supplied Luau map resolves these exact function starts in this build:
+
+| Address | Finding |
+|---|---|
+| `ram:0x10298b913` | `luaB_pcall`-shaped builtin wrapper; prepares the call frame, invokes the protected call machinery, and converts protected statuses/results |
+| `ram:0x10298b946` | `luaB_pcallrun`-shaped continuation/stack-result helper |
+| `ram:0x102995084` | `luaD_rawrunprotected`-shaped protected-execution boundary |
+| `ram:0x102995125` | `luaD_throw`-shaped exception path; throws a C++ exception in this build |
+| `ram:0x1029940f4` | `luaG_runerror`-shaped error construction/propagation path |
+
+So the accurate statement is: **the exported/public `lua_pcall` API name is
+stripped or not used, while the implementation's protected-call machinery and
+the Luau `pcall` builtin remain present.** Roblox's native ScriptContext paths
+also use their own protected VM helpers rather than requiring a public
+`lua_pcall` symbol.
+
 ## Luau-side findings from the supplied function map
 
 The supplied RVAs were checked against the binary's linker function-start
