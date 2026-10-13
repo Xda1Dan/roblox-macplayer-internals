@@ -28,10 +28,11 @@ explicit cross-thread wakeups.
 
 ## Queue internals
 
-* `0x104545ba0` (0xc3 bytes) is an **open-addressing hash insert** over
-  0x80-byte slots: placement `(base + hash) % capacity`, growth factor 1.5x
-  (`cap*3>>1`, minimum 4), full rehash through `0x104545c64`. The queue index
-  is a hash, not a plain array slot.
+* `0x104545ba0` (0xc3 bytes) copies a contiguous range of 0x80-byte queue
+  records into a circular buffer. It grows capacity by 1.5x (`cap*3>>1`,
+  minimum 4), then rehomes records using the old head offset and current
+  count. The expression `((count + head) % capacity) * 0x80` is the ring
+  placement calculation; this is not an open-addressing hash table.
 * `0x10453826a` (0x52 bytes) is the item copy used at enqueue time — payloads
   are copied under the lock, never referenced.
 * Worker side waits on a predicate and pops one item per wakeup (see

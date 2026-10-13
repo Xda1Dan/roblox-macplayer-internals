@@ -101,4 +101,20 @@ AppUpdateAdapter::init("MacDesktopClient") → async scheduler handoff →
 Running (frame jobs) → Leaving (session reports, telemetry) →
 CloseDataModel → SchedulerFacet drain → VmCollectionFacet free → NoSession`,
 with teleport as `Running → Leaving → JoinRequested`.
+
+The inspected close routine at `ram:0x104542918` performs more than a root
+state transition. It iterates service/container lists and clears selected
+contents in a defined teardown sequence, with log points for
+`StarterPack`, `StarterPlayer`, `TextChatService`, `StarterGui`, `CoreGui`,
+`Teams`, `Lighting`, `JointsService`, `TestService`,
+`ServerScriptService`, `ReplicatedStorage`, `ReplicatedFirst`,
+`ServerStorage`, `ChatService`, and `LocalizationService` among others.
+The exact list is build-specific and some entries are flag-gated. This is why
+holding an `Instance` or service pointer past close is unsafe even before the
+VM pool is destroyed.
+
+The DataModel is therefore best modeled as an ownership/lifetime boundary:
+network and script work carries weak/shared references to it, close marks the
+boundary and drains work, then child service contents and script state are
+released in stages.
 `C++`: `include/rbx/datamodel.hpp`, demo in `src/datamodel_demo.cpp`.

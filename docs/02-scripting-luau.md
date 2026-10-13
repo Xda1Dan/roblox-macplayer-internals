@@ -23,8 +23,18 @@
    `JitInliner::RuntimeBytecodeBuilder`, `SharedCodeGenContext`).
 7. **Schedule** — `ExecutorFacet::callInNewThread` / `callAsyncCallback`
    pushes closures onto `lua_State`s from `VmCollectionFacet`'s pool.
-8. **Resume** — `SchedulerFacet::resumeWaitingScripts` drives coroutines
-   (`Resuming delayed/waiting threads`, `Pending script name: %s`).
+8. **Start and resume** — the inspected `LoaderFacet::addScript` execution
+   body is at `ram:0x10158ac46` (this address is a call-site/function body in
+   this build). It logs `Running script`, enforces a three-level
+   `startScript` re-entrancy limit, establishes a `Script Start` profiling
+   scope, obtains a VM/thread-facing object, and invokes the VM start helper.
+   The call keeps script/context shared ownership alive while callbacks and
+   result/error paths are installed. `SchedulerFacet::resumeWaitingScripts`
+   has two observed bodies at `ram:0x1015a8d94` and `ram:0x1015a9249`.
+   Both take an atomic resumption flag, drain a bounded number of waiting
+   entries, stop at a deadline, release each shared waiter, and finish with
+   scheduler bookkeeping. The second body has an additional context/queue
+   predicate and can remove an entry through `0x1015a837c`.
    Yielding APIs suspend instead of blocking (`BoundYieldFuncDesc`,
    `CallYieldHelper`, `YieldFunctionState`).
 9. **Parallel** — `ParallelLuauWorkQueue::executePendingWork`,
@@ -39,6 +49,47 @@
 Teardown reverses it: `LoaderFacet::disassociateState` → scheduler drain
 (`waitingThreads`, `YieldEvent->waiterCount`) → `VmCollectionFacet` free
 (`state thread count %zu`).
+
+### Script-start pseudocode (simplified from the observed body)
+
+```cpp
+void startScript(ScriptContext& context, ScriptRecord& script) {
+    if (++context.startDepth > 3)
+        fatal("startScript re-entrancy has exceeded 3");
+
+    auto vmObject = context.prepareVmObject(script);
+    auto thread = context.createOrSelectThread(vmObject);
+    context.beginProfileRegion(thread, "Script Start");
+    context.installThreadState(thread, script);
+    int result = context.invokeLuauStart(thread, script);
+    if (result == 0)
+        context.publishYieldOrCompletion(thread);
+    else
+        context.publishScriptError(thread);
+    --context.startDepth;
+}
+```
+
+The helper names and exact `lua_State` offsets remain unresolved; the
+important observed properties are the re-entrancy guard, VM/thread handoff,
+profiling scope, and ownership/error cleanup.
+
+### Waiting-script pseudocode
+
+```cpp
+void resumeWaitingScripts(WaitingQueue& q, Deadline deadline) {
+    while (!q.tryClaimResumeFlag()) { /* bounded spin */ }
+    int budget = max(1, configuredWaitingScriptBudget());
+    while (budget-- > 0) {
+        auto waiter = q.popReady();
+        if (!waiter) break;
+        if (clock::now() >= deadline) break;
+        resumeOne(waiter);             // may remain/yield again
+    }
+    q.releaseResumeFlag();
+    schedulerBookkeeping(q, deadline);
+}
+```
 
 ## The host: ScriptContext facets
 

@@ -48,6 +48,18 @@ public:
     SchedulerFacet& scheduler();
     ExecutorFacet& executor();
     VmCollectionFacet& vms();
+
+    // Observed invariant: startScript rejects nesting beyond three levels.
+    unsigned startDepth() const { return startDepth_; }
+    bool tryEnterScript() {
+        if (startDepth_ >= 3) return false;
+        ++startDepth_;
+        return true;
+    }
+    void leaveScript() { if (startDepth_ != 0) --startDepth_; }
+
+private:
+    unsigned startDepth_ = 0;
 };
 
 // Script instance kinds observed in the binary.

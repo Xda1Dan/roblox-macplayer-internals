@@ -16,10 +16,16 @@ channels and strings unless noted.
    (`RakNetConnectTrace/PktTrace`, `RaknetJoinOrDisconnectRequest`,
    `AddProfilerTelemetryScopeForRakNet`, ping breakdown
    `RDeserializeToPBQ`-style stages).
-3. **Reception**: `DeserializePacketsJob` batches on the scheduler
-   (`deserializePacketsJob_total`, `AvgTimeSpentInDeserializeQueue`,
-   `CurrentNumPacketsWaitingForDeserialize`, `ReplicationJoinBatchLog`,
-   `ReplicationDataCaching/Lifetime`, `SlimReplicationLog`).
+3. **Reception**: RakNet's receive loop (`RakNet::RecvFromLoop`,
+   `ram:0x102d60715`) feeds a packet-return queue. The client-side
+   `DeserializePacketsJob`/buffered-deserialize path is represented by
+   `ram:0x10564eab9`: it checks the queue, removes records from a circular
+   queue, updates receive-time counters, creates typed temporary records, and
+   hands them to replication-side processing queues. It can stop or defer work
+   when the per-step budget/queue state says so. The binary exposes the
+   associated measurements `AvgTimeSpentInDeserializeQueue`,
+   `CurrentNumPacketsWaitingForDeserialize`, and
+   `deserializePacketsJob_total`.
 4. **Apply**: `Network::ClusterSerializer::decodePBCChunk` (voxel
    `Grid_NEW` regions) + three replicators — `Large`, `Slim`, `Mega`
    (`LargeReplicatorTrace`, `MegaReplicatorLog/ConnData`,
@@ -41,6 +47,24 @@ largest channel family), `RccRealtimeRelay`.
 enqueue: thread primitives (`0x10320xxxx`), dispatch-to-main registration
 (`"AppleMainThreadBlockingFix"`). Replication receive → deserialize → apply
 crosses threads through the same job-queue machinery as scripting (doc 04).
+
+## What is actually known about RakNet here
+
+RakNet is a compiled transport layer, not the replication schema. The image
+contains `RakPeer`, `RakPeerInterface`, `RakNetSocket`,
+`CCRakNetSlidingWindow`, `BitStream`, and `RBX::Network::RakNetConnection`
+types. Its receive loop handles socket/RakNet packet production, acknowledgements,
+NAKs, split-packet reassembly, and packet-return ownership. Roblox's
+`Replicator` then interprets the resulting application payload and produces
+typed items such as `DeserializedNewObjectItem`,
+`DeserializedChangePropertyItem`, `DeserializedDeleteInstanceItem`,
+`DeserializedEventInvocationItem`, and join-data items.
+
+The inspected deserializer has two important limits: the exact wire schema and
+the helper type names are not recoverable from this build's hidden RBX symbols,
+and the shown pseudocode is compiler output rather than source. Therefore the
+C++ example models ownership and stage boundaries, not a claimed compatible
+RakNet packet format.
 
 ## C++ sketch
 
