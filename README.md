@@ -109,6 +109,14 @@ Roblox binding registration → `_G`/sandbox configuration → VM collection.
 The state is created once per VM collection, not once per script; scripts use
 execution threads from that collection.
 
+The `Players` service is a real reflected service rather than just a vector of
+players. Its registration declares `PlayerAdded`, `PlayerRemoving`, connecting,
+disconnecting, rejoining, membership, and chat events, plus properties such as
+`LocalPlayer`, `MaxPlayers`, `CharacterAutoLoads`, `RespawnTime`, and
+`NumPlayers`. Player parentage under `game.Players` is checked by APIs such as
+`InvokeClient` and `Player:Kick`, so service membership is part of the engine's
+security/replication model.
+
 The public `lua_pcall` name is absent from the binary, but protected execution
 is not absent: `luaB_pcall` (`0x10298b913`), `luaB_pcallrun`
 (`0x10298b946`), `luaD_rawrunprotected` (`0x102995084`), `luaD_throw`, and

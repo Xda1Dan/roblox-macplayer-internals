@@ -94,6 +94,30 @@ plus `ClassDescriptor`, `DescribedBase`, `FunctionDescriptor::Arguments`,
 `include/rbx/reflection.hpp` + `src/reflection_demo.cpp` model registration,
 get/set dispatch, method calls, and event connections.
 
+## Players service
+
+`Players` is a reflected DataModel service with a larger surface than simple
+player storage. The service registration body at `ram:0x100bae0c0` declares
+player lifecycle events including `PlayerAdded`, `PlayerRemoving`,
+`PlayerConnecting`, `PlayerDisconnecting`, `PlayerRejoining`,
+`PlayerMembershipChanged`, and `PlayerChatted`. The larger registration body
+at `ram:0x100bac24b` exposes operations such as `getPlayers`,
+`playerFromCharacter`, `ResetLocalPlayer`, user/name/thumbnail requests,
+character-description creation, moderation/ban APIs, and chat helpers.
+
+The reflected properties include `CharacterAutoLoads`, `MaxPlayers`,
+`MaxPlayersInternal`, `PreferredPlayers`, `PreferredPlayersInternal`,
+`RespawnTime`, `LocalPlayer`, `localPlayer`, `NumPlayers`, and `numPlayers`.
+These are descriptor registrations; they do not by themselves prove that a
+client can mutate every property. Native security/capability and server/client
+context checks still apply.
+
+The player container is also an execution/replication boundary. The binary
+contains checks such as `InvokeClient: player %s must be a child of game.Players`
+and `Player:Kick() can only be called on a Player under Players`. Thus a
+`Player` instance's parent/service membership is semantically significant,
+not cosmetic.
+
 ## Lifecycle state machine
 
 `NoSession → JoinRequested (deeplink/protocol) → BringUpDataModel →

@@ -25,6 +25,13 @@ is:
 The small functions containing the `Cannot start ... lacking capability`
 strings are reporting helpers; `0x10142a7a6` is the function that computes the
 decision. The binary does not show Lua code assigning its own security level.
+
+The native capability vocabulary includes identities/classes such as `Plugin`,
+`LocalUser`, `WritePlayer`, `RobloxScript`, `RobloxEngine`, `Unassigned`,
+`InternalTest`, `PluginOrOpenCloud`, and `RemoteCommand`, plus capability
+groups such as `ServerCommunication`, `Social`, `Teleport`, `AssetRead`,
+`AssetManagement`, and `Logging`. These are policy categories used by native
+checks, not a Lua mechanism for arbitrarily elevating a running script.
 The identity is native execution-context metadata, while capabilities are the
 permission mask used to admit a script.
 3. **Wrap** — source becomes `ProtectedString`; never handled as raw `char*`
