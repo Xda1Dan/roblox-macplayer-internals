@@ -93,6 +93,11 @@ ModuleScript `require` is stateful as well. The native path at
 circular dependencies, rejects destroyed modules, and requires exactly one
 returned value.
 
+Async callbacks first resolve the implementing script through a weak reference.
+The native callback path at `ram:0x101557e8c` rejects destroyed scripts before
+creating callback execution state. Coroutine resumes are admitted only for
+suspended/awaiting states; `ram:0x1015977c1` rejects other states.
+
 ### RakNet is transport, not the replication model
 
 The player contains RakNet types such as `RakPeer`, `RakPeerInterface`,

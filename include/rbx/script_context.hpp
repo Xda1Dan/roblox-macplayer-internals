@@ -36,6 +36,10 @@ public:
     struct ExecutorFacet {
         virtual ~ExecutorFacet() = default;
         virtual void callInNewThread(std::weak_ptr<Instance> fn, Tuple args) = 0;
+        virtual void callAsyncCallback(std::weak_ptr<Instance> implementingScript,
+                                       ProtectedString source,
+                                       const char* chunkName,
+                                       Tuple args) = 0;
     };
     struct VmCollectionFacet {
         virtual ~VmCollectionFacet() = default;
@@ -77,6 +81,33 @@ struct ModuleResult {
     ModuleState state = ModuleState::Unloaded;
     std::shared_ptr<const Tuple> value; // successful require returns one value
     std::string error;
+};
+
+enum class CoroutineState { Running, Suspended, Awaiting, Completed, Failed };
+
+struct AsyncCallbackResult {
+    bool accepted = false;
+    CoroutineState state = CoroutineState::Failed;
+    Tuple values;
+    std::string error;
+};
+
+// The native callback path first resolves the weak script reference and then
+// admits only a resumable coroutine. The VM-specific resume is intentionally
+// left behind this interface.
+class AsyncCallbackGate {
+public:
+    static AsyncCallbackResult admit(bool scriptStillAlive,
+                                     CoroutineState state) {
+        if (!scriptStillAlive)
+            return {false, CoroutineState::Failed, {},
+                    "script implementing callback was destroyed"};
+        if (state != CoroutineState::Suspended &&
+            state != CoroutineState::Awaiting)
+            return {false, state, {},
+                    "coroutine is not suspended/awaiting"};
+        return {true, state, {}, {}};
+    }
 };
 
 // Per-VM state is intentionally separate from the ModuleScript instance.

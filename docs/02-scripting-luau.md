@@ -115,6 +115,21 @@ The state handling includes:
 This is a stateful per-VM module cache, not a simple filesystem-style
 `require(path)` operation.
 
+### Async callbacks and coroutine state
+
+The callback body at `ram:0x101557e8c` resolves the implementing script from a
+weak reference before doing any VM work. If that script has been destroyed it
+raises `Script that implemented this callback has been destroyed while calling
+async callback`. Otherwise it creates a `callAsyncCallback` execution/profiling
+scope, rebuilds the callback's argument/context record, and routes the result
+through the same execution-object and VM-facing machinery used by script
+starts. Its normal, deferred, and error paths all release shared references.
+
+The small state gate at `ram:0x1015977c1` accepts only the VM states represented
+by suspended/awaiting coroutine states. Any other state produces
+`ModuleScript cannot resume non-suspended awaiting coroutine`; this prevents a
+second resume of a running or already-completed coroutine.
+
 ### Waiting-script pseudocode
 
 ```cpp
