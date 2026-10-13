@@ -35,6 +35,31 @@ channels and strings unless noted.
    Workspace`, `Cannot predict instance {}: Only instances under Workspace`,
    `NetworkOwnershipErrors`, `StreamingPinLog`, `IsSingleDataModelLifeCycleListener`).
 
+## Player join/removal boundary
+
+Player membership is represented as a replicated service operation, not only
+as a local `Instance` insertion. The binary has separate network-side
+`onPlayerAdded` and `onPlayerRemoving` paths with failure reporting, while the
+Players service registers public lifecycle events. The supported lifecycle is:
+
+```text
+join/player replication item
+  → create or resolve Player under Players
+  → update player/session bookkeeping
+  → fire PlayerAdded / connecting notifications
+  → downstream services observe the new Player
+
+leave/removal item
+  → remove network/player bookkeeping
+  → fire PlayerRemoving / disconnecting notifications
+  → release dependent service references
+```
+
+The exact join opcode and wire fields remain unresolved. What is supported is
+the boundary: APIs enforce that a Player used by client calls is a child of
+`game.Players`, and service consumers receive lifecycle events after membership
+changes.
+
 ## Voice is separate
 
 `RealtimeMedia`, `StratusSession`, `WebrtcInput`, `LibWebrtcImpl`,

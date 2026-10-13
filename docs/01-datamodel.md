@@ -118,6 +118,11 @@ and `Player:Kick() can only be called on a Player under Players`. Thus a
 `Player` instance's parent/service membership is semantically significant,
 not cosmetic.
 
+The binary also distinguishes several lifecycle notifications rather than one
+generic event: connecting, disconnecting, rejoining, membership changes,
+public `PlayerAdded`/`PlayerRemoving`, and local-player transitions. Some
+player/container surfaces expose a `PlayerRemoved` event separately.
+
 ## Lifecycle state machine
 
 `NoSession → JoinRequested (deeplink/protocol) → BringUpDataModel →

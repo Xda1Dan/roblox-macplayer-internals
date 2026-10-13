@@ -117,6 +117,11 @@ disconnecting, rejoining, membership, and chat events, plus properties such as
 `InvokeClient` and `Player:Kick`, so service membership is part of the engine's
 security/replication model.
 
+Player join/removal crosses the network and DataModel boundaries: replicated
+player bookkeeping resolves membership under `game.Players`, then lifecycle
+events are delivered to service consumers; removal performs the inverse before
+dependent references are released.
+
 The public `lua_pcall` name is absent from the binary, but protected execution
 is not absent: `luaB_pcall` (`0x10298b913`), `luaB_pcallrun`
 (`0x10298b946`), `luaD_rawrunprotected` (`0x102995084`), `luaD_throw`, and
