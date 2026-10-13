@@ -103,6 +103,12 @@ waiting and schedules a timed resume; it does not block an OS thread.
 C-stack limit before resuming. The header's `GetGlobalState` label at
 `0x55d5e74` is more accurately a ScriptContext facet accessor in this build.
 
+The state-creation caller is `ram:0x1015b92cd`: allocator/context →
+`lua_newstate` → ScriptContext VM wrapper → panic/interrupt hooks → library and
+Roblox binding registration → `_G`/sandbox configuration → VM collection.
+The state is created once per VM collection, not once per script; scripts use
+execution threads from that collection.
+
 ModuleScript `require` is stateful as well. The native path at
 `ram:0x10158dd88` checks security context, tracks per-VM module state, detects
 circular dependencies, rejects destroyed modules, and requires exactly one

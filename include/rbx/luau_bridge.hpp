@@ -54,6 +54,48 @@ private:
     lua_State* thread_; // coroutine stack sharing global_State
 };
 
+struct LuaStateConfig {
+    void* allocatorContext = nullptr;
+    bool sandboxed = true;
+    bool openBase = true;
+    bool openMath = true;
+    bool openOs = false;
+    bool robloxBindingsInstalled = false;
+};
+
+// Shape of the observed ScriptContext-owned VM collection. A real engine
+// supplies its allocator, callback hooks, libraries, globals, and bindings.
+class VmCollection {
+public:
+    using Allocator = void* (*)(void*, void*, size_t, size_t);
+    using Hook = void (*)(lua_State*);
+
+    explicit VmCollection(LuaStateConfig config) : config_(config) {}
+
+    bool create(Allocator allocator, void* context, Hook panicHook,
+                Hook interruptHook) {
+        if (!allocator) return false;
+        allocator_ = allocator;
+        config_.allocatorContext = context;
+        panicHook_ = panicHook;
+        interruptHook_ = interruptHook;
+        // The actual player calls lua_newstate and then installs libraries and
+        // bindings. This reconstruction intentionally does not fake a VM.
+        created_ = true;
+        return true;
+    }
+
+    bool created() const { return created_; }
+    const LuaStateConfig& config() const { return config_; }
+
+private:
+    LuaStateConfig config_;
+    Allocator allocator_ = nullptr;
+    Hook panicHook_ = nullptr;
+    Hook interruptHook_ = nullptr;
+    bool created_ = false;
+};
+
 enum class CoroutineStatus { Running, Suspended, Waiting, Completed, Failed };
 
 // Engine-owned task.wait shape: schedule a wake deadline and return control

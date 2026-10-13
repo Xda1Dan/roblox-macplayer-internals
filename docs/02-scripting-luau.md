@@ -251,6 +251,41 @@ through ScriptContext's waiting machinery, and returns control to the VM. This
 is the native reason a Luau `task.wait()` yields without blocking the worker
 thread.
 
+### Lua state creation in this player
+
+The exact caller of `lua_newstate` is `ram:0x1015b92cd`. Its sequence is
+visible in the body:
+
+```text
+allocator callback + allocator context
+  → lua_newstate (allocates a 0x4d60-byte state)
+  → fail hard if state creation returns null
+  → attach allocator/configuration data to a ScriptContext VM wrapper
+  → install panic/interrupt/error callbacks
+  → initialize Luau/standard library entry points
+  → register Roblox-specific libraries and globals
+  → establish _G and sandbox/configuration handlers
+  → retain the wrapper in the VM collection
+```
+
+The state initializer at `ram:0x10299fd5b` accepts a function pointer and
+context, calls that allocator for `0x4d60` bytes, initializes the global-state
+and main-thread pointers, stack/GC fields, and runs a protected initialization
+routine. The caller immediately reports `Failed to create Lua state` if it
+returns null.
+
+The caller then installs callbacks and invokes a long series of library
+registration functions. The names in the offset header map to several of the
+same routines (`luaopen_math`, `luaopen_os`, `luaopen_base`, and others), but
+the engine does not simply expose an unrestricted stock Lua environment: the
+library set, globals, Roblox bindings, sandbox configuration, identity, and
+capabilities are applied around the VM before scripts run.
+
+The VM is therefore not created per individual script. A ScriptContext owns a
+VM collection; scripts obtain execution threads/stacks from that collection,
+and `task.wait`/resume operate on those threads. Teardown releases the VM
+collection only after waiting scripts and yield waiters have been drained.
+
 ### Correct interpretation of the offset header
 
 The header is a useful symbol/offset index, but its names are analyst labels,
