@@ -50,6 +50,15 @@ Teardown reverses it: `LoaderFacet::disassociateState` → scheduler drain
 (`waitingThreads`, `YieldEvent->waiterCount`) → `VmCollectionFacet` free
 (`state thread count %zu`).
 
+The destructor bodies make that ordering concrete. The scheduler teardown at
+`ram:0x1015a7d1e` reports `YieldEvent->waiterCount`, releases the waiting
+thread claim/lock, reports `waitingThreads.size()`, and then destroys its
+queue/event/ownership members before poison-filling roughly `0x280` bytes.
+The VM collection teardown at `ram:0x1015bab74` walks multiple fixed-size VM
+slots, reports each state's thread count, releases per-slot resources and
+allocators, then poison-fills roughly `0x5e0` bytes. These are lifetime
+operations, not merely diagnostic logging.
+
 ### Script-start pseudocode (simplified from the observed body)
 
 ```cpp

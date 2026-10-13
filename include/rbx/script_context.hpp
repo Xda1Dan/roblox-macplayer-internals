@@ -147,6 +147,33 @@ public:
     }
 };
 
+// Destruction order follows the native lifetime boundary: stop admission,
+// drain waiting work, release VM lanes, then invalidate the context.
+class ScriptContextLifetime {
+public:
+    bool closing() const { return closing_; }
+    void beginClose() { closing_ = true; }
+
+    void noteWaitingThreads(size_t count) { waitingThreads_ = count; }
+    void noteYieldWaiters(size_t count) { yieldWaiters_ = count; }
+    size_t waitingThreads() const { return waitingThreads_; }
+    size_t yieldWaiters() const { return yieldWaiters_; }
+
+    bool canSchedule() const { return !closing_; }
+    void drainComplete() {
+        waitingThreads_ = 0;
+        yieldWaiters_ = 0;
+        vmsReleased_ = true;
+    }
+    bool vmsReleased() const { return vmsReleased_; }
+
+private:
+    bool closing_ = false;
+    bool vmsReleased_ = false;
+    size_t waitingThreads_ = 0;
+    size_t yieldWaiters_ = 0;
+};
+
 struct ScriptOptions {
     ScriptKind kind = ScriptKind::Script;
     std::string runContext; // "Server" | "Client" | "Plugin" | "Legacy"

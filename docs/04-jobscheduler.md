@@ -72,6 +72,11 @@ arbiter/start timestamp, then invokes the virtual step at vtable offset
 `+0x10`. This confirms that job execution is polymorphic: the scheduler does
 not contain a large switch over every job type.
 
+The matching stop wrapper at `ram:0x102eec76c` clears the active bit, calls the
+virtual stop hook at `+0x18`, records elapsed time and stop timestamp, updates
+the arbiter, and emits `JobStop`. Under profiling flags it also records the
+worker thread and job name in a bounded per-thread diagnostic ring.
+
 The allocator at `ram:0x102ee3136` obtains a free node from a scheduler-owned
 pool, copies the job's shared state with atomic reference-count increments,
 updates a deadline/priority-like atomic value, and publishes the node through

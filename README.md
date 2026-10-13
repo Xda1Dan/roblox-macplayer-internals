@@ -134,6 +134,13 @@ an open-addressing hash table.
 Job execution is polymorphic: `ram:0x102eec6da` marks a job active and calls
 its virtual step function. `ram:0x102ee3136` allocates bounded job nodes and
 publishes them atomically; node exhaustion is a fatal scheduler diagnostic.
+The matching stop path clears the active state, calls the virtual stop hook,
+records elapsed time, updates the arbiter, and emits job timing diagnostics.
+
+ScriptContext teardown drains waiting threads and yield waiters before
+destroying scheduler members; VM collection then releases per-slot state and
+poison-fills the old object storage. Work must not retain raw VM or
+DataModel/service pointers across this boundary.
 
 ## Original C++ examples
 
