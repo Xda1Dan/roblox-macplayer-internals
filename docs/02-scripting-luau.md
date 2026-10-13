@@ -74,6 +74,25 @@ The helper names and exact `lua_State` offsets remain unresolved; the
 important observed properties are the re-entrancy guard, VM/thread handoff,
 profiling scope, and ownership/error cleanup.
 
+### Additional native boundaries
+
+`ram:0x101593650` is a script compilation-cache/loader boundary, not the VM
+resume itself. It constructs a Luau-facing value, reads compact or
+out-of-line string storage, calls a helper supplying cached or compiled data,
+and has an explicit `Unexpected type in script compilation cache.` failure
+path. This places cache lookup between source/policy handling and execution.
+
+`ram:0x10159502e` is a native pre-run policy gate. It builds diagnostic data
+including `scriptClass` and `script`, and contains the messages `Script "{}"
+was blocked from being ran under a restricted container.` and `detected as
+malicious. ... will not run.` A script can therefore be rejected before the
+VM start path, rather than only failing inside Luau.
+
+`ram:0x10158cc58` initializes an execution record: it copies compact fields,
+retains shared references, derives execution flags from the script and current
+context, and stores inherited limits/identity data. The exact field meanings
+are not stable enough to publish as fixed offsets.
+
 ### Waiting-script pseudocode
 
 ```cpp

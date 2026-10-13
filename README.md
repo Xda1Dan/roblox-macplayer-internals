@@ -1,49 +1,177 @@
-# Roblox Mac Player Internals
+# Roblox macOS Player Internals
 
-Architecture notes + illustrative C++ reconstructions for the
-Roblox macOS player (`RobloxPlayer.app`, `0.742.0.7421053`,
-`MacPlayer-version-f9247f9560044102`, x86_64 Mach-O, 120 MB).
+Architecture notes and original C++ reconstructions for the Roblox macOS
+player binary examined in this repository.
 
-Three subsystems, traced from the binary outward:
+The documentation focuses on the boundaries that matter when rebuilding a
+small compatible engine architecture:
 
-| # | Subsystem | Doc |
-|---|-----------|-----|
-| 1 | Scripting + Luau execution | [docs/02-scripting-luau.md](docs/02-scripting-luau.md) |
-| 2 | DataModel (root, services, lifecycle) | [docs/01-datamodel.md](docs/01-datamodel.md) |
-| 3 | Networking + replication | [docs/03-replication-net.md](docs/03-replication-net.md) |
+```text
+platform/bootstrap
+        │
+        ▼
+DataModel ── services ── ScriptContext ── Luau VMs
+    │              │             │
+    │              │             └─ waiting/resume jobs
+    │              └─ reflection/events
+    │
+    └─ NetworkClient/RakNet → packet queues → deserializer → replicator
 
-Supporting docs: [job system](docs/04-jobscheduler.md), [ObjC bridge](docs/05-objc-bridge.md),
-[loader/layout](docs/00-overview.md), [evidence ledger](docs/06-evidence-ledger.md)
-(every claim mapped to a binary address, log tag, or header).
+all asynchronous work enters the TaskScheduler/job system
+```
 
-## Sources
+## Target
 
-* The player binary itself: version, SHA-256, and every address in these docs
-  (`ram:` = file offset + `0x100000000`).
-* Luau OSS (`github.com/luau-lang/luau`) for the VM-side reference table.
-* Roblox public API documentation for service membership, cited where used.
+| Property | Value |
+|---|---|
+| Application | `RobloxPlayer.app` |
+| Player build | `0.742.0.7421053` |
+| Target name | `MacPlayer-version-f9247f9560044102` |
+| Format | 64-bit little-endian x86_64 Mach-O executable |
+| Approximate size | 120 MB |
+| Image base | `0x100000000` |
+| SHA-256 | `ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47` |
 
-## C++ reconstructions
+Addresses in the documentation use `ram:` addresses. For this build, a file
+offset is converted to a virtual address by adding `0x100000000`.
 
-`include/rbx/` + `src/` are **original illustrative reconstructions** of the
-observed shapes (reflection descriptors, job queue, SSO strings, Luau embedding
-pattern). They are not copied engine code.
+## Read the documentation in this order
+
+1. **[Overview and binary layout](docs/00-overview.md)** — target facts,
+   entry points, Objective-C boundary, and address conventions.
+2. **[DataModel](docs/01-datamodel.md)** — the per-session root, services,
+   lifetime states, reflection, and teardown ordering.
+3. **[Scripting and Luau](docs/02-scripting-luau.md)** — script admission,
+   policy checks, compilation/cache boundary, VM handoff, yielding, waiting
+   scripts, modules, and garbage collection.
+4. **[Networking and replication](docs/03-replication-net.md)** — RakNet,
+   packet ownership, deserialize jobs, typed replication items, and DataModel
+   application.
+5. **[TaskScheduler](docs/04-jobscheduler.md)** — job submission, ring queues,
+   wakeups, frame jobs, and shutdown.
+6. **[Objective-C bridge](docs/05-objc-bridge.md)** — application callbacks,
+   web messages, and native-to-engine event delivery.
+7. **[Evidence ledger and limits](docs/06-evidence-ledger.md)** — addresses,
+   confidence boundaries, and unresolved details.
+
+## The most important findings
+
+### DataModel is a lifetime boundary
+
+The DataModel is a per-session root and service provider, not merely a global
+table of services. Join creates it; network and script work retain or weakly
+reference it; close drains dependent work before freeing script state. The
+close path at `ram:0x104542918` clears service containers individually,
+including StarterPack, StarterPlayer, TextChatService, StarterGui, CoreGui,
+Teams, Lighting, ReplicatedStorage, ReplicatedFirst, ServerStorage,
+ServerScriptService, ChatService, and others.
+
+### Script execution is staged native work
+
+The native path is approximately:
+
+```text
+Script instance
+  → context/run-policy gate
+  → source or compilation-cache handling
+  → execution-record construction
+  → Luau VM/thread selection
+  → start/resume
+  → yield, completion, or error
+  → waiting-script queue
+  → later scheduler resume
+```
+
+The inspected start path at `ram:0x10158ac46` has a three-level
+`startScript` re-entrancy limit, a `Script Start` profiling scope, VM/thread
+handoff, and shared ownership across callbacks. The waiting-script bodies at
+`ram:0x1015a8d94` and `ram:0x1015a9249` claim an atomic resumption flag, drain
+a bounded number of waiters, observe a deadline, and release each waiter.
+
+### RakNet is transport, not the replication model
+
+The player contains RakNet types such as `RakPeer`, `RakPeerInterface`,
+`RakNetSocket`, `BitStream`, and `CCRakNetSlidingWindow`. The observed flow is:
+
+```text
+RakNet::RecvFromLoop
+  → packet-return queue
+  → DeserializePacketsJob / buffered deserializer
+  → Replicator receive path
+  → typed Deserialized*Item
+  → DataModel mutation
+```
+
+The buffered deserializer at `ram:0x10564dd3c` drains queued records, updates
+receive timing and queue state, constructs typed temporary records, and hands
+them to replication-side processing. The exact wire schema is intentionally
+not claimed here.
+
+### The scheduler is the common crossing point
+
+Objective-C callbacks, network receives, Lua callbacks, frame work, and
+maintenance all become scheduled work. The observed submission chain is:
+
+```text
+0x10521311e → 0x104f54dc6 → 0x104f54c96 → 0x104f54876
+                                      └→ 0x104545ba0
+                                      └→ 0x102ee57de wakeup
+```
+
+`0x104545ba0` grows and copies a circular 0x80-byte record buffer; it is not
+an open-addressing hash table.
+
+## Original C++ examples
+
+The `include/rbx/` and `src/` files are original, deliberately simplified
+reconstructions. They are not Roblox source and are not wire-compatible with
+the player.
+
+| Example | Demonstrates |
+|---|---|
+| `reflection_demo` | Descriptor registration, property/method dispatch, events |
+| `jobqueue_demo` | Mutex-protected queues, worker wakeup, shutdown |
+| `sso_string_demo` | Small-string optimization-shaped ownership behavior |
+| `datamodel_demo` | DataModel bring-up, services, world instances, event job, close |
+| `luau_embed_demo` | Optional Luau compile/load/resume boundary |
+
+Build and run the default examples:
 
 ```sh
-make            # builds src/* demos with g++ -std=c++17
+make
 ./build/reflection_demo
 ./build/jobqueue_demo
 ./build/sso_string_demo
+./build/datamodel_demo
 ```
 
-`src/luau_embed_demo.cpp` additionally needs Luau OSS headers
-(`LUAAU_INCLUDE`); it is excluded from the default build.
+The optional Luau example requires Luau OSS headers and libraries. It is kept
+outside the default build because Luau is an external dependency:
 
-## Ground rules used throughout
+```sh
+make LUAU_INCLUDE=/path/to/luau/VM/include
+```
 
-* Observation vs inference vs unknown are kept separate.
-* Every address is `ram:` = file offset + `0x100000000` (image base).
-* No proprietary code is reproduced; behavioral findings are paraphrased.
+## How to use these notes responsibly
 
-Target SHA-256 (`Contents/MacOS/RobloxPlayer`):
-`ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47`
+This is a build-specific architectural study. Treat the following as
+unstable across player versions:
+
+- native addresses;
+- inferred object offsets;
+- vtable positions;
+- flag-gated service lists;
+- scheduler queue layout;
+- replication and RakNet integration details.
+
+The documents distinguish observed behavior, derived structure, illustrative
+inference, and unresolved questions. Decompiled pseudocode is not source and
+should not be copied into a production implementation without independently
+validating its ownership, threading, and error behavior.
+
+## License and boundaries
+
+The C++ examples and documentation in this repository are original material.
+No proprietary Roblox source is reproduced. Roblox, Roblox Player, Luau, and
+related names remain the property of their respective owners. Use these notes
+for learning, compatibility research, and independent implementation work.

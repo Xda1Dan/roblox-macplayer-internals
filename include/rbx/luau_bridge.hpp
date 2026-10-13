@@ -7,6 +7,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <functional>
 
 // Provided by Luau OSS (github.com/luau-lang/luau), NOT vendored here.
 #include "lua.h"
@@ -15,6 +16,34 @@
 #include "Luau/Require.h" // luarequire_Configuration
 
 namespace rbx {
+
+struct ScriptExecutionPolicy {
+    uint32_t identityLevel = 0;
+    bool restrictedContainer = false;
+    bool trustedBytecode = false;
+};
+
+// Native loader stages visible in the player: policy gate, cache/compile,
+// then VM load/resume. This is an illustrative interface, not engine code.
+class ScriptExecutionPipeline {
+public:
+    using PolicyCheck = std::function<bool(const ScriptExecutionPolicy&)>;
+    using CacheLookup = std::function<std::vector<char>(const char*, size_t)>;
+
+    ScriptExecutionPipeline(PolicyCheck policy, CacheLookup cache)
+        : policy_(std::move(policy)), cache_(std::move(cache)) {}
+
+    bool allowed(const ScriptExecutionPolicy& policy) const {
+        return !policy.restrictedContainer && policy_(policy);
+    }
+    std::vector<char> cachedOrCompiled(const char* source, size_t size) const {
+        return cache_(source, size);
+    }
+
+private:
+    PolicyCheck policy_;
+    CacheLookup cache_;
+};
 
 // One pooled VM lane (cf. VmCollectionFacet: acquire/release).
 class LuaLane {
