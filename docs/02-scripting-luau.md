@@ -9,6 +9,24 @@
    capabilities, `Security::Identity` + `VMClasses`. Rejections observed:
    `Cannot start {client,server} script '%s' (lacking capability …)`,
    `Can't resume script in this context`.
+
+The concrete start-admission predicate is at `ram:0x10142a7a6`. It reads the
+script's run-context field, obtains a native capability mask, and checks the
+relevant bit before allowing the start path to continue. The observed mapping
+is:
+
+* server-context admission requires the `RunServerScript` capability;
+* client-context admission requires the `RunClientScript` capability;
+* plugin/core/special contexts take additional native branches rather than
+  simply bypassing the check;
+* ancestry/container and DataModel state can still veto admission after the
+  capability bit is present.
+
+The small functions containing the `Cannot start ... lacking capability`
+strings are reporting helpers; `0x10142a7a6` is the function that computes the
+decision. The binary does not show Lua code assigning its own security level.
+The identity is native execution-context metadata, while capabilities are the
+permission mask used to admit a script.
 3. **Wrap** — source becomes `ProtectedString`; never handled as raw `char*`
    in facet signatures.
 4. **Load** — `LoaderFacet`: `addScript`, `requireModule`,
@@ -82,6 +100,22 @@ void startScript(ScriptContext& context, ScriptRecord& script) {
 The helper names and exact `lua_State` offsets remain unresolved; the
 important observed properties are the re-entrancy guard, VM/thread handoff,
 profiling scope, and ownership/error cleanup.
+
+### What “script execution level” means here
+
+There are three related but different concepts:
+
+1. **RunContext** — where the script is intended to run: server, client,
+   plugin, or legacy.
+2. **Security identity** — native context metadata carried into the script
+   execution record and used by reflection/security checks.
+3. **Capabilities** — the native permission set, including
+   `RunClientScript` and `RunServerScript`, checked before the VM is entered.
+
+Changing a `RunContext` property does not itself grant permission. The native
+context must possess the corresponding capability, and the script must still
+pass DataModel/ancestry/container checks. This is why a script can be present
+in the correct service and still be refused before execution.
 
 ### Additional native boundaries
 

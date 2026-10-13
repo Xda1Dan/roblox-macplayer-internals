@@ -14,6 +14,33 @@ namespace rbx {
 struct SecurityIdentity { uint32_t level = 0; };
 struct ProtectedString { std::string bytes; }; // source is never raw char*
 
+enum class RunContext { Legacy, Server, Client, Plugin };
+
+enum class ScriptCapability : uint64_t {
+    RunClientScript = 1ull << 8,
+    RunServerScript = 1ull << 9,
+};
+
+struct ExecutionContext {
+    RunContext runContext = RunContext::Legacy;
+    SecurityIdentity identity;
+    uint64_t capabilities = 0;
+
+    bool has(ScriptCapability capability) const {
+        return (capabilities & static_cast<uint64_t>(capability)) != 0;
+    }
+
+    bool admitsScript() const {
+        switch (runContext) {
+        case RunContext::Client: return has(ScriptCapability::RunClientScript);
+        case RunContext::Server: return has(ScriptCapability::RunServerScript);
+        case RunContext::Plugin:
+        case RunContext::Legacy: return true; // additional native gates apply
+        }
+        return false;
+    }
+};
+
 class ScriptContext : public Instance {
 public:
     static const ClassDescriptor kDescriptor;

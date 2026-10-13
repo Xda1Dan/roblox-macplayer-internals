@@ -88,6 +88,12 @@ handoff, and shared ownership across callbacks. The waiting-script bodies at
 `ram:0x1015a8d94` and `ram:0x1015a9249` claim an atomic resumption flag, drain
 a bounded number of waiters, observe a deadline, and release each waiter.
 
+The native admission predicate at `ram:0x10142a7a6` separates **RunContext**,
+**security identity**, and **capabilities**. Server scripts require the native
+`RunServerScript` capability; client scripts require `RunClientScript`. The
+script's service/ancestry, DataModel state, and special plugin/core branches
+are checked as well. Lua does not assign itself a higher execution level.
+
 ModuleScript `require` is stateful as well. The native path at
 `ram:0x10158dd88` checks security context, tracks per-VM module state, detects
 circular dependencies, rejects destroyed modules, and requires exactly one
