@@ -260,7 +260,7 @@ against Luau source semantics (tag constants match source exactly:
 
 | Table slot | Handler | Behavior | Stock slot |
 |---|---|---|---|
-| 1 | `0x1029b3d0d` | copies argument TValues, grows the stack (`luaD_growstack`-shaped call), sets the new frame top — call setup | 21 |
+| 1 | `0x1029b3d0d` | moves argument TValues to the new top, nils the old slots, grows the stack — function-entry argument shuffle (PREPVARARGS-shaped) | 65 |
 | 3 | `0x1029b4ed7` | number plus constant-table number, slow-path fallback — ADDK (second operand addressed off the constant base, not the stack) | 39 |
 | 9 | `0x1029b52ab` | patches the loop-counter field of its own instruction — FOR-loop prep | 56 |
 | 12 | `0x1029b5485` | constant-exponent `x*x`, `sqrt(x)`, `x*x*x` fast paths, `_pow()` fallback — POWK | 44 |
@@ -269,7 +269,7 @@ against Luau source semantics (tag constants match source exactly:
 | 17 | `0x1029b5934` | number/number or string/string less-than, skip-on-false — JUMPIFLT | 29 |
 | 18 | `0x1029b5863` | number register vs constant-table number compare, conditional skip with flag bit — JUMPXEQKN family | 79 |
 | 20 | `0x1029b79a5` | number×number, vector paths, userdata-metatable fallback, slow path — MUL | 35 |
-| 22 | `0x1029b361a` | function-tag check plus inline-cache compare before dispatch — cached call dispatch | 21-ish |
+| 22 | `0x1029b361a` | function-tag check plus inline-cache compare before dispatch — call-path probe trampoline; exact role medium-low | — |
 | 25 | `0x1029b5735` | `a - round(a/b)*b` on stack numbers — MOD | 37 |
 | 28 | `0x1029b786d` | `floor(a/b)` on stack-over-constant numbers, vector paths, tag-method `0xc` (IDIV) fallback — IDIVK | 82 |
 | 40 | `0x1029b367b` | two-word instruction with AUX feedback slot, seal-then-helper sequence — CALLFB | 87 |
@@ -285,7 +285,7 @@ against Luau source semantics (tag constants match source exactly:
 | 66 | `0x1029b5a1b` | unconditional constant-to-register copy across two instruction words — LOADKX | 66 |
 | 69 | `0x1029b5688` | 4-instruction unconditional 16-bit jump, no interrupt check — JUMP | 23 |
 | 71 | `0x1029b563b` | register truthy wins, else constant operand — ORK (pairs with slot 55 ANDK; slot 111 OR below confirms the plain shape) | 48 |
-| 74 | `0x1029b6653` | method-name string check, inline-cache compare, slow lookup fallback — NAMECALL | 20 |
+| 74 | `0x1029b6653` | single-value cached const-key load with predicted-slot check and patch-C protocol, no invocation — GETTABLEKS | 15 |
 | 78 | `0x1029b3a82` | two stack args copied, builtin-ID dispatch with 3-arg shape — FASTCALL3-leaning | 60 |
 | 79 | `0x1029b3b7c` | multi-value copy plus SIMD tag validation, top adjust — unidentified (return/vararg-list shaped) | — |
 | 80 | `0x1029b66fb` | nil-or-false test, skip-or-fall-through — JUMPIFNOT | 26 |
@@ -309,7 +309,7 @@ against Luau source semantics (tag constants match source exactly:
 | 125 | `0x1029b45da` | builtin-ID dispatch with constant-table args and arg-count 2 — FASTCALL2K-leaning | 75 |
 | 127 | `0x1029b46b0` | per-tag method table (`global+0x960`, `0x48` stride) userdata call with marshaling — exact opcode unidentified, possibly engine-extended fast path | — |
 | 140 | `0x1029b5599` | writes the signed 16-bit literal as a number — LOADN | 4 |
-| 141 | `0x1029b48d3` | constant string key with predicted-slot cache, vector fold, userdata `__index` path — GETTABLEKS | 15 |
+| 141 | `0x1029b48d3` | const-key lookup with method/self setup and invocation machinery (full userdata and metatable paths) — NAMECALL | 20 |
 | 142 | `0x1029b64a0` | function/table/userdata dispatch with TM_ITER/TM_CALL metatable lookup, unconditional first jump — FORGPREP | 76 |
 | 144 | `0x1029b5d80` | register-to-upvalue copy with write barrier — SETUPVAL | 10 |
 | 145 | `0x1029b5d3c` | constant-minus-register doubles — SUBRK | 71 |
@@ -326,11 +326,30 @@ against Luau source semantics (tag constants match source exactly:
 | 164 | `0x1029b5de3` | immediate-index array fast path (`index < size`, no metatable), `index+1` slow path via `gettable` — GETTABLEN, matches source line-for-line | 17 |
 | 168 | `0x1029b68a9` | table clone helper plus GC step — DUPTABLE | 54 |
 | 176 | `0x1029b8a33` | interrupt hook call with VM state reload and re-dispatch — interrupt trampoline, JUMPBACK/COVERAGE family, medium-low | — |
+| 179 | `0x1029b6d12` | string register vs constant-string compare with NOT flag — JUMPXEQKS | 80 |
+| 183 | `0x1029b6150` | array- and hash-part traversal with index/value writeback, loop-back vs fallthrough exits — FORGLOOP | 58 |
+| 185 | `0x1029b605b` | unconditional wide jump from the instruction word, no state change — JUMPX | 67 |
+| 190 | `0x1029b88f9` | vararg-region copy with MULTRET branch — GETVARARGS family, exact member under review (possible second slot; see notes) | — |
+| 198 | `0x1029b60fa` | reversed-strict less-than across number, string, and metamethod paths — JUMPIFNOTLE | 31 |
+| 201 | `0x1029b6cca` | truthiness test, truthy selects second register — AND | 45 |
+| 204 | `0x1029b60be` | single constant-to-register copy, no AUX — LOADK | 5 |
+| 206 | `0x1029b60be` | boolean register vs constant compare with NOT flag — JUMPXEQKB | 78 |
+| 207 | `0x1029b4f33` | MULTRET handling, CallInfo alloc, Lua/C closure split — CALL | 21 |
+| 209 | `0x1029b5fc8` | constant-divided-by-register doubles — DIVRK | 72 |
+| 210 | `0x1029b600e` | nil/false/else to boolean, no jump — NOT | 50 |
+| 216 | `0x1029b5e8c` | tag-dispatch table, inverted sense of JUMPIFEQ — JUMPIFNOTEQ | 30 |
+| 219 | `0x1029b5abe` | stack-headroom check plus step, fallthrough dispatch — unidentified trampoline | — |
+| 220 | `0x1029b79fb` | constant-times-register with tag-method `0xa` (MUL) fallback — MULK | 41 |
+| 222 | `0x1029b7b3c` | number and vector add fast paths, tag-method `0x8` (ADD) fallback — ADD | 33 |
+| 227 | `0x1029b5216` | single stack-arg builtin call — FASTCALL1-leaning | 73 |
+| 231 | `0x1029b6bdc` | table/const/reg write via helper — SETTABLEKS-leaning, medium-low | 16 |
 
 Every identified slot differs from its stock position, so the shuffle is
-established by behavior, not just by table sparsity. All handlers end by
-jumping back to the central dispatch (`0x1029b3618` / `0x1029b360d`
-region), confirming the single-loop structure.
+established by behavior, not just by table sparsity. Slot↔handler
+assignments are verified by reading the table back directly, which caught
+one mislabeled batch before publication. All handlers end by jumping back
+to the central dispatch (`0x1029b3618` / `0x1029b360d` region), confirming
+the single-loop structure.
 
 Two open questions live in the FASTCALL corner. Slot 78 was first labeled
 plain FASTCALL and is now FASTCALL3-leaning (3-arg shape); slot 149 owns
