@@ -34,7 +34,8 @@ These are unknowns, not oversights:
   tunables were not established.
 - Struct offsets such as `+0x778` belong to this build only and move
   between versions.
-- `luau_execute` (`0x29adfd3`) is a confirmed entry whose optimized body is
-  not detailed here.
+- `luau_execute` (`0x29adfd3`) is a dispatch stub (status check plus
+  opcode jump table); the interpreter loop bodies behind `0x1072d9230`
+  are not detailed here.
 - Exact wire formats, helper names behind internal calls, and per-build
   tunable values are not claimed.

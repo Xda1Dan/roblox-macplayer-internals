@@ -20,7 +20,7 @@ protected execution
   |  ram:0x102995084  luaD_rawrunprotected boundary
   |  ram:0x102995125  luaD_throw (C++ exception in this build)
   |  ram:0x1029940f4  luaG_runerror
-  |  ram:0x1029adfd3  luau_execute (entry confirmed, highly optimized body not detailed here)
+  |  ram:0x1029adfd3  luau_execute dispatch stub (status check + jump table)
   v
 selective pointer hardening (string-reference hardening)
 ```
@@ -122,10 +122,38 @@ the shipped symbol and string inventory. The machinery is present:
 | 0x102995084 | luaD_rawrunprotected boundary |
 | 0x102995125 | luaD_throw via C++ exception |
 | 0x1029940f4 | luaG_runerror build and propagate |
-| 0x1029adfd3 | luau_execute entry confirmed; highly optimized body not detailed here |
+| 0x1029adfd3 | luau_execute dispatch stub (see below) |
 
 So: name stripped, implementation present. Engine paths also use their own
 ScriptContext protected helpers rather than needing a public `lua_pcall`.
+
+### `luau_execute` is a dispatch stub
+
+`ram:0x1029adfd3` (0xfb bytes) is not the interpreter loop — it is the
+entry that selects *which* loop to enter:
+
+1. Check the thread status byte (`[RDI+0x6]`). Value `1` tail-jumps to
+   the resume path at `0x1029adfe9`; anything else falls into the
+   fresh-call path at `0x1029b359c`. Calling convention is `RDI` = thread.
+2. The fresh path tests a hook flag (`[RAX+0x2c] & 4`) and runs the debug
+   hook (`CALL [RAX+0x6f0]`) when set.
+3. It reads the first bytecode byte, loads the opcode jump table at
+   `0x1072d9230`, and enters the interpreter with `JMP [table + byte*8]` —
+   a computed goto, which is what defeated the decompiler.
+
+```asm
+1029adfd3 PUSH RBP
+1029adfd7 CMP byte ptr [RDI+0x6],0x1
+1029adfdb JNZ 0x1029adfe3       ; fresh-call path
+1029adfdd POP RBP
+1029adfde JMP 0x1029adfe9       ; resume path
+; fresh path at 0x1029b359c:
+1029b35b8 TEST byte ptr [RAX+0x2c],0x4   ; hook flag?
+1029b35ca CALL qword ptr [RAX+0x6f0]     ; debug hook
+1029b3609 MOVZX EAX,byte ptr [R11]       ; first opcode byte
+1029b360d LEA R15,[0x1072d9230]          ; opcode jump table
+1029b3614 JMP qword ptr [R15+RAX*8]     ; enter interpreter loop
+```
 
 ---
 
@@ -157,5 +185,5 @@ string references still exist elsewhere.
 ## Unknowns
 
 - Exact helper names behind VM start / resume calls.
-- `luau_execute` body and calling convention.
+- Interpreter loop bodies behind the `0x1072d9230` opcode table.
 - Full library open list vs flag-gated subsets per build.

@@ -347,6 +347,5 @@ that does is a use-after-free by construction.
 ## Unknowns (kept honest)
 
 - Exact `lua_State` field offsets and helper names behind the VM calls.
-- The `luau_execute` (`0x29adfd3`) body/call convention — entry confirmed,
-  body is highly optimized and not detailed here.
+- Interpreter loop bodies behind the `0x1072d9230` opcode table.
 - Exact waiting-queue budget/deadline tunables per build.
