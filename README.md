@@ -39,20 +39,44 @@ offset is converted to a virtual address by adding `0x100000000`.
 
 1. **[Overview and binary layout](docs/00-overview.md)** — target facts,
    entry points, Objective-C boundary, and address conventions.
-2. **[DataModel](docs/01-datamodel.md)** — the per-session root, services,
+2. **[Script execution, end to end](docs/07-script-execution.md)** — start here
+   for scripting: admission → start → resume → wait → require → teardown,
+   each with what-it-does, step-by-step, pseudocode, and assembly.
+3. **[TaskScheduler internals](docs/08-scheduler-internals.md)** — enqueue
+   assembly walkthrough, ring buffer, virtual step/stop, node pool.
+4. **[Luau VM lifecycle](docs/09-luau-vm-lifecycle.md)** — `lua_newstate`,
+   VM wrapper, protected calls, split-pointer hardening.
+5. **[DataModel](docs/01-datamodel.md)** — the per-session root, services,
    lifetime states, reflection, and teardown ordering.
-3. **[Scripting and Luau](docs/02-scripting-luau.md)** — script admission,
-   policy checks, compilation/cache boundary, VM handoff, yielding, waiting
-   scripts, modules, and garbage collection.
-4. **[Networking and replication](docs/03-replication-net.md)** — RakNet,
+6. **[Scripting and Luau reference](docs/02-scripting-luau.md)** — full
+   facet/method catalog, policy vocabulary, module states, teardown order.
+7. **[Networking and replication](docs/03-replication-net.md)** — RakNet,
    packet ownership, deserialize jobs, typed replication items, and DataModel
    application.
-5. **[TaskScheduler](docs/04-jobscheduler.md)** — job submission, ring queues,
-   wakeups, frame jobs, and shutdown.
-6. **[Objective-C bridge](docs/05-objc-bridge.md)** — application callbacks,
+8. **[TaskScheduler reference](docs/04-jobscheduler.md)** — job submission,
+   ring queues, wakeups, frame jobs, and shutdown.
+9. **[Objective-C bridge](docs/05-objc-bridge.md)** — application callbacks,
    web messages, and native-to-engine event delivery.
-7. **[Evidence ledger and limits](docs/06-evidence-ledger.md)** — addresses,
+10. **[Evidence ledger and limits](docs/06-evidence-ledger.md)** — addresses,
    confidence boundaries, and unresolved details.
+
+### How to read a deep-dive doc
+
+Each of `07`, `08`, `09` follows the same shape:
+
+```text
+What it does (plain English, 3-5 lines)
+  → Function card (address, size, logs, confidence)
+  → Step by step (numbered, in execution order)
+  → Assembly excerpt (short, annotated, factual)
+  → Simplified reconstruction (original C++, not engine source)
+  → Patterns / pitfalls
+  → Unknowns
+```
+
+Short assembly excerpts are factual instruction bytes; longer
+reconstructions are original illustrations. Full decompiler dumps are not
+reproduced.
 
 ## The most important findings
 
