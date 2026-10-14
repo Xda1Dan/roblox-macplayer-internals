@@ -247,6 +247,12 @@ against Luau source semantics (tag constants match source exactly:
 | 22 | `0x1029b361a` | function-tag check plus inline-cache compare before dispatch — cached call dispatch | 21-ish |
 | 25 | `0x1029b5735` | `a - round(a/b)*b` on stack numbers — MOD | 37 |
 | 28 | `0x1029b786d` | `floor(a/b)` on stack-over-constant numbers, vector paths, tag-method `0xc` (IDIV) fallback — IDIVK | 82 |
+| 71 | `0x1029b563b` | conditional select-copy (truthy register wins, else constant) — no certain opcode; left unidentified | — |
+| 74 | `0x1029b6653` | method-name string check, inline-cache compare, slow lookup fallback — NAMECALL | 20 |
+| 78 | `0x1029b3a82` | dispatches through a third table at `0x1072d74e0` indexed by builtin ID — FASTCALL | 68 |
+| 79 | `0x1029b3b7c` | multi-value copy plus SIMD tag validation, top adjust — unidentified (return/vararg-list shaped) | — |
+| 80 | `0x1029b66fb` | nil-or-false test, skip-or-fall-through — JUMPIFNOT | 26 |
+| 83 | `0x1029b6314` | number negate (sign-flip via per-build masks), tag-method `0xf` (UNM) fallback — MINUS | 51 |
 
 Every identified slot differs from its stock position (exact stock:
 CALL 21, ADD 33, MUL 35, POW 38, FORNPREP 56), so the shuffle is
