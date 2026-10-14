@@ -344,8 +344,57 @@ that does is a use-after-free by construction.
 
 ---
 
+## ScriptContext creation and destruction
+
+**What is established.** The destruction side is fully mapped at
+`ram:0x1015466d8`: facet teardown helpers run first, then the scheduler
+facet at `+0x128` (`ram:0x1015a7d1e`), then the VM collection at `+2`
+(`ram:0x1015bab74`), then a final release helper. Three related addresses
+form a triad with it:
+
+| Address | Role |
+|---|---|
+| `ram:0x101545276` | facet state machine: `+0x12a0` moves `1→2` (destroy the context at `+0x180`), then `→3`; any other state reports `Invalid Facet Access` |
+| `ram:0x1055d5e74` | facet accessor: state below `3` returns `context+0xdc0`, otherwise `Invalid Facet Access` |
+| `ram:0x1015466d8` | destructor body described above |
+
+**What is not established.** The exact construction call-site (which
+`operator new` size, which caller runs the facet constructors) was chased
+through facet-helper callers, vtable references, and neighboring
+functions without landing on a confirmed constructor. Service creation in
+this engine goes through the reflection `DescribedCreatable` path, and
+the ScriptContext instance of that path is still unmapped. The vtable
+region around `0x10622d770` has no direct code references, consistent
+with construction through a table rather than an inline address.
+
+## GC tunables
+
+**What is established.** The engine registers its own GC flag vocabulary:
+
+| Flag | Reader |
+|---|---|
+| `LuauGcGoal` | `ram:0x1015609ba` region |
+| `LuauGcGoalCore` | same region |
+| `LuauGcGoalStartup` / `LuauGcGoalNormal` | `ram:0x105273f8c` region |
+| `LuauGcStepMul`, `LuauGcStepSizeKb` | same region |
+
+These mirror Luau's `LUA_GCSETGOAL` / step-multiplier / step-size knobs.
+The registration bodies are confirmed; the exact engine call that pushes
+these values into each fresh `global_State` was not isolated — flag
+*values* live in globals storage with no direct code references found,
+so the application point stays unmapped.
+
+**What is established inside the VM.** The inline step trigger at
+`ram:0x1030d6217` shows Luau's own pacing: after a barrier-guarded write
+it compares stack top against the GC threshold and calls `luaC_step`
+(`ram:0x102996c06`) directly. Engine-level tuning sets the thresholds;
+the VM enforces them on every allocation path without scheduler
+involvement.
+
 ## Unknowns (kept honest)
 
 - Exact `lua_State` field offsets and helper names behind the VM calls.
 - Interpreter loop bodies behind the `0x1072d9230` opcode table.
 - Exact waiting-queue budget/deadline tunables per build.
+- ScriptContext construction call-site and GC flag application point
+  (see above for how far the trace got).
