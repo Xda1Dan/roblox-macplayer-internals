@@ -349,6 +349,4 @@ that does is a use-after-free by construction.
 - Exact `lua_State` field offsets and helper names behind the VM calls.
 - The `luau_execute` (`0x29adfd3`) body/call convention — entry confirmed,
   body is highly optimized and not detailed here.
-- `task.spawn` (`0x14cff67`) wrapper semantics — entry is a small
-  task-library helper; caller trace still needed.
 - Exact waiting-queue budget/deadline tunables per build.

@@ -206,6 +206,25 @@ time are recorded.
 `task.wait` never sleeps a worker. It marks the coroutine waiting,
 packages a wake deadline, queues the resume, and returns to the VM.
 
+### Task library
+
+The `task` table is registered at `ram:0x1014cebe0`, which pairs each name
+with its backing function:
+
+| Lua name | Address | Behavior |
+|---|---|---|
+| `synchronize` | `ram:0x1014cedfe` | only from an Actor-descendant script, else `task.synchronize() may only be called from a script that is a descendant of an Actor` |
+| `desynchronize` | `ram:0x1014ceec6` | same Actor gate |
+| `defer` | `ram:0x1014cef92` | shared spawn/delay/wait core: Aurora rejection, re-entrancy cap (`Maximum re-entrancy depth (%i) exceeded calling task.defer`), deferred-growth guard (`Exponential deferred event growth detected calling task.defer`) |
+| `spawn` | `ram:0x1014cf416` | Aurora-gated, serializes arguments, schedules a new thread |
+| `delay` | `ram:0x1014cf56a` | spawn plus a wake time, then the same wait path |
+| `wait` | `ram:0x1014cf74a` | marks the coroutine waiting, timed resume, no OS sleep |
+| `cancel` | `ram:0x1014cf880` | `cannot cancel thread` unless it owns a live thread |
+
+A label reading `task.spawn = 0x14cff67` is wrong for this build:
+`ram:0x1014cff67` is a small error-string helper (returns `"unknown"` and
+related names), not the spawn implementation.
+
 State creation runs through `ram:0x1015b92cd`: allocator and context,
 `lua_newstate` for `0x4d60` bytes, failure becomes `Failed to create Lua
 state`, then hooks, libraries, Roblox bindings, `_G`, sandbox and config,
@@ -213,9 +232,11 @@ and the VM collection takes ownership. States belong to the collection.
 Scripts borrow threads.
 
 A label such as `GetGlobalState = 0x55d5e74` is better read as a facet
-accessor here. `task.spawn = 0x14cff67` lands in a small task-library
-helper whose public wrapper still needs a caller trace. Labels are an
-index, not a stable interface.
+accessor here. A label reading `task.spawn = 0x14cff67` is wrong for this
+build: `ram:0x1014cff67` is an error-string helper, while the real
+`spawn` / `delay` / `defer` entries are `ram:0x1014cf416`,
+`ram:0x1014cf56a`, and `ram:0x1014cef92` (see the task library table
+above). Labels are an index, not a stable interface.
 
 ## Native to Lua events
 
