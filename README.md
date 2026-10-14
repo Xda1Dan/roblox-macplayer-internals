@@ -129,6 +129,13 @@ State creation runs through `0x1015b92cd`: allocator and context,
 `_G` and sandbox setup, then the VM collection owns it. States belong to
 the collection. Scripts borrow threads from it.
 
+Execution enters through a dispatch stub (`0x1029adfd3`) that checks the
+`singlestep` flag and jumps into one of two opcode tables —
+`0x1072d8a30` (single-step loop) or `0x1072d9230` (normal loop) — each
+with 93 handler slots in identical positions but separate handler copies.
+The slot order does not match public Luau `LOP_*` order, so bytecode
+bytes are shuffled relative to stock Luau.
+
 The public name `lua_pcall` is absent, but protected execution is present:
 `luaB_pcall` (`0x10298b913`), `luaB_pcallrun` (`0x10298b946`),
 `luaD_rawrunprotected` (`0x102995084`), `luaD_throw`, and `luaG_runerror`

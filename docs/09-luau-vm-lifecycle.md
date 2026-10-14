@@ -178,6 +178,28 @@ source (`lvmexecute.cpp`, `lstate.h`):
 1029b3614 JMP qword ptr [R15+RAX*8]     ; enter interpreter loop
 ```
 
+### Twin opcode tables, shuffled bytes
+
+There are **two** adjacent 256-entry tables in `__DATA:__const`:
+
+| Table | Address | Targets |
+|---|---|---|
+| A (single-step loop) | `0x1072d8a30` | `0x1029ae03e–0x1029b34fc` |
+| B (normal loop) | `0x1072d9230` | `0x1029b361a–0x1029b8b9f` |
+
+Both hold exactly 93 non-zero slots with bit-identical occupancy masks
+but different handler addresses — one handler copy per loop, back to
+back in `__text` (combined span `0x1029ae03e–0x1029b8b9f`).
+
+The striking part: stock Luau has exactly 93 opcodes (`LOP_NOP` = 0 …
+`LOP_FINCONSTRUCT` = 92), yet the non-zero slots scatter across indices
+0–255 (slot 0 empty, slot 2 empty, slots 32–39 all empty, and so on).
+The table does **not** follow stock `LOP_*` order — the opcode byte
+values in this build's bytecode are shuffled relative to public Luau.
+That count match (93 slots = 93 opcodes) is observed; the shuffle itself
+is the natural reading, and it means stock-Luau bytecode will not execute
+here even where the VM logic is identical.
+
 ---
 
 ## 4. Split pointers (why some string references miss)
@@ -209,6 +231,9 @@ string references still exist elsewhere.
 
 - Exact helper names behind VM start / resume calls.
 - Interpreter loop bodies behind the `0x1072d9230` opcode table.
+  Twin tables exist (`0x1072d8a30` single-step, `0x1072d9230` normal),
+  each with 93 non-zero slots in identical positions but different
+  handlers; the slot order does not match stock `LOP_*` order.
 - Full library open list vs flag-gated subsets per build.
 
 ## A note on the address list
