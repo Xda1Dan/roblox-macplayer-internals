@@ -361,13 +361,17 @@ one mislabeled batch before publication. All handlers end by jumping back
 to the central dispatch (`0x1029b3618` / `0x1029b360d` region), confirming
 the single-loop structure.
 
-Two open questions live in the FASTCALL corner. Slot 78 was first labeled
-plain FASTCALL and is now FASTCALL3-leaning (3-arg shape); slot 149 owns
-the plain-FASTCALL evidence (paired CALL word, the unique signature).
-Separately, two different builtin tables appear: `0x1072d74e0` (whose
-entries point at C-builtin implementations) and `0x1072d7ce0` (mixed
-contents, including non-code slots). Which table serves which call path
-is not settled — the opcode IDs above do not depend on it.
+Two FASTCALL tables are present and their roles are now clearer. Luau source
+has a `luauF_table[256]` of typed fast functions (`assert`, math functions,
+bit functions, and so on). The table at `0x1072d74e0` has entries pointing
+into the Luau builtin code region (`0x10298...`), matching that fast-function
+role. The table at `0x1072d7ce0` is mixed: code pointers are interleaved with
+non-code values, so it is not the same direct function table; it is likely a
+separate builtin/name/dispatch structure used by another FASTCALL path.
+
+The remaining shape question is which Roblox builtin IDs populate each table
+at every index. The opcode conclusions do not depend on that unresolved
+index-to-name mapping.
 
 A duplicate-slot question is open on stores: slots 74 and 236 are both
 store-shaped with patch-C (the former smaller with a method-vector
