@@ -290,6 +290,12 @@ against Luau source semantics (tag constants match source exactly:
 | 79 | `0x1029b3b7c` | multi-value copy plus SIMD tag validation, top adjust — unidentified (return/vararg-list shaped) | — |
 | 80 | `0x1029b66fb` | nil-or-false test, skip-or-fall-through — JUMPIFNOT | 26 |
 | 83 | `0x1029b6314` | number negate (sign-flip via per-build masks), tag-method `0xf` (UNM) fallback — MINUS | 51 |
+| 85 | `0x1029b3daf` | no pc advance, debugbreak-hook check, re-dispatch on the real opcode — BREAK | 1 |
+| 86 | `0x1029b6386` | array-bounds-checked indexed store with barrier, `C+1` key, slow `settable` — SETTABLEN | 18 |
+| 87 | `0x1029b3e2b` | two-word, MULTRET count handling, array grow, bulk copy with barrier — SETLIST | 55 |
+| 88 | `0x1029b3f18` | userdata-tag check, direct-access table, cached-slot patch, miss rewrites to slow path — SETUDATAKS | 84 |
+| 92 | `0x1029b3f8d` | two-word cached import with safeenv check, generic fallback — GETIMPORT | 12 |
+| 106 | `0x1029b7ae6` | all-stack operands, `DIVSD`/`DIVPS` fast paths, tag-method `0xb` (DIV) fallback — DIV | 36 |
 | 107 | `0x1029b5583` | writes nil tag to the destination slot, single-word — LOADNIL | 2 |
 | 109 | `0x1029b6275` | upvalue-table source with closed-over dereference, 16-byte copy — GETUPVAL | 9 |
 | 111 | `0x1029b67ec` | falsy first operand wins, else second (inverse of ANDK) — OR | 46 |
