@@ -1,2 +1,22 @@
 /* Roblox internals docs tweaks */
-.hero { padding: 1.5rem 0; }
+.hero {
+  padding: 1.5rem 0;
+}
+
+.md-typeset .hero h1 {
+  font-size: 2.2rem;
+  margin-bottom: .4rem;
+}
+
+.md-typeset .hero p {
+  font-size: 1.05rem;
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset .hero .md-button {
+  margin-right: .4rem;
+}
+
+.md-typeset .grid.cards > ul > li {
+  min-height: 9rem;
+}

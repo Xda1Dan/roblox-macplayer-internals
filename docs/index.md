@@ -1,9 +1,34 @@
+<div class="hero" markdown>
+
 # Roblox macOS Player Internals
 
-Notes on how the Roblox macOS player is put together, with small C++
-examples that show the same shapes.
+Notes on how one Roblox macOS player build is put together — engine
+architecture, the Luau VM, the TaskScheduler, RakNet replication, and
+the DataModel — illustrated with small, runnable C++ examples.
 
-The focus is on the parts that matter if you want to understand the engine:
+[Walkthroughs](00-overview.md){ .md-button .md-button--primary }
+[Reference](01-datamodel.md){ .md-button }
+[Examples](examples.md){ .md-button }
+[Repository](https://github.com/Xda1Dan/roblox-macplayer-internals){ .md-button }
+
+</div>
+
+## Target build
+
+| Property | Value |
+|---|---|
+| Application | `RobloxPlayer.app` |
+| Player build | `0.742.0.7421053` |
+| Target name | `MacPlayer-version-f9247f9560044102` |
+| Format | 64-bit little-endian x86_64 Mach-O executable |
+| Approximate size | 120 MB |
+| Image base | `0x100000000` |
+| SHA-256 | `ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47` |
+
+Addresses in these notes are virtual addresses. For this build,
+file offset + `0x100000000` = virtual address.
+
+## Engine map
 
 ```text
 platform / bootstrap
@@ -19,58 +44,37 @@ DataModel -- services -- ScriptContext -- Luau VMs
 almost everything asynchronous runs as a job in the TaskScheduler
 ```
 
-## Target
+## Read in this order
 
-| Property | Value |
-|---|---|
-| Application | `RobloxPlayer.app` |
-| Player build | `0.742.0.7421053` |
-| Target name | `MacPlayer-version-f9247f9560044102` |
-| Format | 64-bit little-endian x86_64 Mach-O executable |
-| Approximate size | 120 MB |
-| Image base | `0x100000000` |
-| SHA-256 | `ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47` |
+<div class="grid cards" markdown>
 
-Addresses in these notes are virtual addresses. For this build,
-file offset + `0x100000000` = virtual address.
+- :material-map-outline: **Walkthroughs**
 
-## How to read these notes
+    Binary overview, script execution end to end, TaskScheduler internals,
+    Luau VM lifecycle, and the replication deserialize path.
+    [Start here](00-overview.md)
 
-Start with the walkthroughs, then use the reference pages as needed:
+- :material-book-open-variant: **Reference**
 
-1. [Binary overview](00-overview.md) — layout, entry, app boundary.
-2. [Script execution, end to end](07-script-execution.md) — start here
-   for scripting: permission check, start, resume, wait, require, shutdown.
-3. [TaskScheduler internals](08-scheduler-internals.md) — how jobs are
-   queued, stored in rings, and run on workers.
-4. [Luau VM lifecycle](09-luau-vm-lifecycle.md) — how a `lua_State` is
-   created, wrapped, protected, and hardened.
-5. [Replication deserialize path](10-replication-deserialize.md) — how
-   received packets become typed work without blocking the socket thread.
-6. [DataModel](01-datamodel.md) — the per-session root, services,
-   ownership, and shutdown order.
-7. [Scripting reference](02-scripting-luau.md) — facets, policy words,
-   module states, teardown order.
-8. [Networking reference](03-replication-net.md) — transport, queues,
-   replicator items, DataModel apply rules.
-9. [Scheduler reference](04-jobscheduler.md) — submit path, node pool,
-   frame jobs, timing.
-10. [Objective-C bridge](05-objc-bridge.md) — app callbacks, web views,
-    native-to-engine events.
-11. [Addresses and limits](06-evidence-ledger.md) — where each address
-    lives and what is still unknown.
+    DataModel, Luau scripting, replication net, job scheduler, Objective-C
+    bridge, and evidence ledger.
+    [Browse reference](01-datamodel.md)
 
-Each walkthrough follows the same shape:
+- :material-code-braces: **C++ examples**
 
-```text
-What it does
-  -> Big picture
-  -> Step by step
-  -> Behavior in code form
-  -> What the machine code looks like
-  -> Addresses in this build
-  -> What is not claimed
-```
+    Reflection, job queue, SSO string, DataModel, and optional Luau VM
+    demonstrations.
+    [See examples](examples.md)
+
+- :material-shield-check-outline: **Limits**
+
+    What was verified in this build and what is explicitly not claimed.
+    [Read caveats](06-evidence-ledger.md)
+
+</div>
+
+Each walkthrough follows the same shape: big picture, step by step,
+behavior in code form, machine code, addresses, and explicit limits.
 
 Short machine-code excerpts are facts about the binary. Longer C++
 listings are original illustrations, not player source.
