@@ -3,6 +3,8 @@
 Notes on how the Roblox macOS player is put together, with small C++
 examples that show the same shapes.
 
+Documentation site: https://xda1dan.github.io/roblox-macplayer-internals/
+
 The focus is on the parts that matter if you want to understand the engine:
 
 ```text
