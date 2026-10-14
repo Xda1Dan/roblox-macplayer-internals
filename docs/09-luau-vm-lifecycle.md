@@ -287,7 +287,7 @@ against Luau source semantics (tag constants match source exactly:
 | 71 | `0x1029b563b` | register truthy wins, else constant operand — ORK (pairs with slot 55 ANDK; slot 111 OR below confirms the plain shape) | 48 |
 | 74 | `0x1029b6653` | value register stored into cached node slot with write barrier and patch-C — SETTABLEKS (operand roles match source: value from A, key from AUX) | 16 |
 | 78 | `0x1029b3a82` | two stack args copied, builtin-ID dispatch with 3-arg shape — FASTCALL3-leaning | 60 |
-| 79 | `0x1029b3b7c` | multi-value copy plus SIMD tag validation, top adjust — unidentified (return/vararg-list shaped) | — |
+| 79 | `0x1029b3b7c` | object gate, skip-to-CALL decode, stack-to-frame copy, vectorized nil-fill of the result tail — FINCONSTRUCT | 92 |
 | 80 | `0x1029b66fb` | nil-or-false test, skip-or-fall-through — JUMPIFNOT | 26 |
 | 83 | `0x1029b6314` | number negate (sign-flip via per-build masks), tag-method `0xf` (UNM) fallback — MINUS | 51 |
 | 85 | `0x1029b3daf` | no pc advance, debugbreak-hook check, re-dispatch on the real opcode — BREAK | 1 |
@@ -325,12 +325,12 @@ against Luau source semantics (tag constants match source exactly:
 | 163 | `0x1029b635b` | writes boolean value and tag with skip — LOADB | 3 |
 | 164 | `0x1029b5de3` | immediate-index array fast path (`index < size`, no metatable), `index+1` slow path via `gettable` — GETTABLEN, matches source line-for-line | 17 |
 | 168 | `0x1029b68a9` | table clone helper plus GC step — DUPTABLE | 54 |
-| 176 | `0x1029b8a33` | interrupt hook call with VM state reload and re-dispatch — interrupt trampoline, JUMPBACK/COVERAGE family, medium-low | — |
+| 176 | `0x1029b8a33` | native-flag write, saved-pc reset, native-enter gate with reentry — NATIVECALL | 62 |
 | 179 | `0x1029b6d12` | string register vs constant-string compare with NOT flag — JUMPXEQKS | 80 |
 | 183 | `0x1029b6150` | array- and hash-part traversal with index/value writeback, loop-back vs fallthrough exits — FORGLOOP | 58 |
 | 185 | `0x1029b605b` | unconditional wide jump from the instruction word, no state change — JUMPX | 67 |
 | 186 | `0x1029b4a5f` | string hash probe with predicted slot, full `__index`/metatable/userdata/object fallbacks funneled into `gettable` — GETTABLEKS | 15 |
-| 190 | `0x1029b88f9` | vararg-region copy with MULTRET branch — GETVARARGS family, exact member under review (possible second slot; see notes) | — |
+| 190 | `0x1029b88f9` | interrupt prologue, MULTRET limit, frame pop, native-reentry block — RETURN (opposite copy direction and frame pop rule out the GETVARARGS-duplicate theory) | 22 |
 | 198 | `0x1029b60fa` | reversed-strict less-than across number, string, and metamethod paths — JUMPIFNOTLE | 31 |
 | 201 | `0x1029b6cca` | truthiness test, truthy selects second register — AND | 45 |
 | 204 | `0x1029b60be` | single constant-to-register copy, no AUX — LOADK | 5 |
