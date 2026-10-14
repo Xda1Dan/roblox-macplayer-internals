@@ -308,6 +308,12 @@ against Luau source semantics (tag constants match source exactly:
 | 120 | `0x1029b411c` | table fast path plus full slow path with userdata/object handling (`luaV_gettable`) — GETTABLE | 13 |
 | 125 | `0x1029b45da` | builtin-ID dispatch with constant-table args and arg-count 2 — FASTCALL2K-leaning | 75 |
 | 127 | `0x1029b46b0` | per-tag method table (`global+0x960`, `0x48` stride) userdata call with marshaling — exact opcode unidentified, possibly engine-extended fast path | — |
+| 140 | `0x1029b5599` | writes the signed 16-bit literal as a number — LOADN | 4 |
+| 141 | `0x1029b48d3` | constant string key with predicted-slot cache, vector fold, userdata `__index` path — GETTABLEKS | 15 |
+| 142 | `0x1029b64a0` | function/table/userdata dispatch with TM_ITER/TM_CALL metatable lookup, unconditional first jump — FORGPREP | 76 |
+| 144 | `0x1029b5d80` | register-to-upvalue copy with write barrier — SETUPVAL | 10 |
+| 145 | `0x1029b5d3c` | constant-minus-register doubles — SUBRK | 71 |
+| 147 | `0x1029b64a0` | MULTRET bulk copy or bounded copy with nil fill — GETVARARGS | 63 |
 | 159 | `0x1029b6c2a` | table indexed by number register with equality fast path, `gettable` slow path — GETTABLE family, exact member medium-low | — |
 | 160 | `0x1029b5a48` | unconditional 16-byte register copy — MOVE | 6 |
 | 163 | `0x1029b635b` | writes boolean value and tag with skip — LOADB | 3 |
