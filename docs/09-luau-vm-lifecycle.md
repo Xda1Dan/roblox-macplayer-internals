@@ -202,6 +202,31 @@ here even where the VM logic is identical.
 
 ---
 
+### Loop-1 (single-step) mirrors loop-2 per slot
+
+Spot-checked through raw disassembly: table-A handlers for slots 3, 12,
+and 20 implement the same semantics as their table-B twins. Slots 3 and
+20 match inline (same `addsd`/`mulsd` fast paths, byte-identical
+prologues apart from the pc register). Slot 12 differs in layout only:
+loop-2 keeps the POWK `2.0`/`0.5`/`3.0` fast paths inline, loop-1 calls
+an outlined helper at `0x105a78166` holding the identical constant
+compares and the same `_pow` callee.
+
+Loop-1's dispatch and frame differ systematically from loop-2's:
+
+| | Loop 1 (single-step) | Loop 2 (normal) |
+|---|---|---|
+| Table | A at `0x1072d8a30` | B at `0x1072d9230` |
+| Central dispatch | `0x1029ae667`: index, load handler, stash pc, jump via `0x1029ae038` trampoline | `0x1029b360d`: index, jump straight through |
+| pc register | `r8` | `r11` |
+| Constant base | `[rbp-0x50]` | `[rbp-0x48]` |
+| Hook trampoline | `0x1029ae031` → `0x1029ae615` debug check | inline hook flag test |
+
+All handler tails converge on the loop's dispatch point, so each loop is
+self-contained. The constant-base difference is why K-operand addressing
+must be read relative to each loop's own frame, not as an absolute
+offset.
+
 ## 4. Split pointers (why some string references miss)
 
 **What it does:** selected sites replace `lea reg,[rip+string]` with
@@ -247,6 +272,12 @@ against Luau source semantics (tag constants match source exactly:
 | 22 | `0x1029b361a` | function-tag check plus inline-cache compare before dispatch — cached call dispatch | 21-ish |
 | 25 | `0x1029b5735` | `a - round(a/b)*b` on stack numbers — MOD | 37 |
 | 28 | `0x1029b786d` | `floor(a/b)` on stack-over-constant numbers, vector paths, tag-method `0xc` (IDIV) fallback — IDIVK | 82 |
+| 40 | `0x1029b367b` | two-word instruction with AUX feedback slot, seal-then-helper sequence — CALLFB | 87 |
+| 46 | `0x1029b55c5` | safeenv + table + nil triple check, iterator setup — FORGPREP_NEXT | 61 |
+| 52 | `0x1029b4105` | 3 instructions: advance one word, zero state change — no-op family (NOP/BREAK indistinguishable in production) | 0 |
+| 55 | `0x1029b5607` | truthy test, truthy selects constant operand — ANDK | 47 |
+| 56 | `0x1029b551d` | table and string fast paths, `__len` fallback, number result — LENGTH | 52 |
+| 57 | `0x1029b598e` | hash/array sizes, table allocate, GC check — NEWTABLE | 53 |
 | 58 | `0x1029b39cd` | string-keyed global lookup with cache check and slow-path patch — GETGLOBAL | 7 |
 | 61 | `0x1029b56bf` | table + number + exactly-0.0 checks, iterator setup — FORGPREP_INEXT | 59 |
 | 63 | `0x1029b54e1` | jump iff truthy (nil/false fall through) — JUMPIF | 25 |
