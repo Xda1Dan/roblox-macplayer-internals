@@ -227,6 +227,26 @@ int serverOnReceive(Server* s, Packet p) {
 }
 ```
 
+### The 0x90 join case, step by step
+
+1. **Replay guard.** Flag `+0x585c`: already seen → mark `+0x585d`,
+   report `AlreadySeen`, stop. Join packets are idempotent by
+   construction.
+2. **Bitstream reads** for the join payload (version fields, addresses).
+3. **Luau version gate.** Client min/max vs build version. Out of range →
+   `Unsupported Luau version requested` + `UnsupportedLuauVersion` +
+   disconnect `0x106`.
+4. **Preloaded version.** If present, stash it and log
+   `ClientPreloadedVersion received`.
+5. **Player slot check.** Empty (`+0xb13 == 0`) → `Player Creation Error`
+   + `FailedCreatePlayer` + disconnect `0x106`.
+6. **Creation chain** (all shared-ownership handoffs):
+   `0x104dd011c` → `0x105680895` (build the player object) →
+   `0x1056841fc` (attach at `+0xb07`) → `0x10568b20c` (finalize) →
+   virtual `+0x6f8` (replicator registration) → `0x10567e0fc`
+   (post-create) → `0x10554c5d4` (DataModel/session registration with
+   weak-reference release).
+
 ## Unknowns
 
 - Exact wire opcodes and field codecs (not recovered; hidden symbols).
