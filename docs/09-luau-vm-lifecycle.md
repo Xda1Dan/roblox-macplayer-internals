@@ -20,7 +20,7 @@ protected execution
   |  ram:0x102995084  luaD_rawrunprotected boundary
   |  ram:0x102995125  luaD_throw (C++ exception in this build)
   |  ram:0x1029940f4  luaG_runerror
-  |  ram:0x1029adfd3  luau_execute dispatch stub (status check + jump table)
+  |  ram:0x1029adfd3  luau_execute dispatch stub (singlestep check + jump table)
   v
 selective pointer hardening (string-reference hardening)
 ```
@@ -47,12 +47,19 @@ fields, then runs protected init. Null means the caller reports
 
 1. `CALL R15` with `(ctx, NULL, 0, 0x4d60)` - the allocator is the first
    argument. Roblox owns allocation policy; Luau just calls back.
-2. Branch on a global flag: two init layouts (fast vs full zeroing). Both
-   write the same logical fields: type tag `0x90a`, thread byte `0x9`,
-   allocator fn/ctx at `+0x5c/+0x60`, list links, stack caps `0x4d60`.
-3. `bzero` large ranges - a fresh state has no stale stack / GC / upvalue
+   `0x4d60` is `sizeof(LG)` (`lua_State` + `global_State`).
+2. Branch on a global flag: two init layouts (fast vs full zeroing). This
+   is `FFlag::LuauEasyStateInit` straight from Luau source — the fast
+   path zeroes one range and writes a handful of fields, the full path
+   initializes every field individually.
+3. The tag write `*L = 0x90a` decodes against source too: low byte `0x0A`
+   is `LUA_TTHREAD`, high byte `0x09` is the initial `marked` bits
+   (`L->tt = LUA_TTHREAD; L->marked = ...`). Allocator fn/ctx land at
+   `+0x5c/+0x60` (`g->frealloc`, `g->ud`), stack caps read back as
+   `0x4d60`.
+4. `bzero` large ranges - a fresh state has no stale stack / GC / upvalue
    data by construction.
-4. Protected init call; nonzero means free state and return null.
+5. Protected init call; nonzero means free state and return null.
 
 **Assembly - allocator call plus tag init (excerpt)**
 
@@ -127,29 +134,45 @@ the shipped symbol and string inventory. The machinery is present:
 So: name stripped, implementation present. Engine paths also use their own
 ScriptContext protected helpers rather than needing a public `lua_pcall`.
 
+Checked against Luau source, the labels hold up:
+
+- `luaD_throw` uses the C++ `lua_exception` path (not setjmp) — the
+  binary body contains `___cxa_throw`, and the string table holds
+  `lua_exception: not enough memory`, which is source's `LUA_MEMERRMSG`.
+- `luaB_pcall` matches source's `lua_pcallyieldable` wrapper shape, and
+  the neighboring `luaB_pcallrun` matches the `luaB_pcallcont` result
+  shuffling (shift results right to make room for the status boolean).
+
 ### `luau_execute` is a dispatch stub
 
 `ram:0x1029adfd3` (0xfb bytes) is not the interpreter loop — it is the
-entry that selects *which* loop to enter:
+entry that selects *which* loop to enter. Cross-checked against Luau
+source (`lvmexecute.cpp`, `lstate.h`):
 
-1. Check the thread status byte (`[RDI+0x6]`). Value `1` tail-jumps to
-   the resume path at `0x1029adfe9`; anything else falls into the
-   fresh-call path at `0x1029b359c`. Calling convention is `RDI` = thread.
-2. The fresh path tests a hook flag (`[RAX+0x2c] & 4`) and runs the debug
-   hook (`CALL [RAX+0x6f0]`) when set.
+1. Test `[RDI+0x6]`. The `lua_State` header is 3 bytes
+   (`tt`/`marked`/`memcat`), then `status` (+3), `activememcat` (+4),
+   `isactive` (+5), `singlestep` (+6) — so this byte is `singlestep`,
+   **not** thread status as an earlier revision of these notes claimed.
+   Value `1` tail-jumps to the single-step loop at `0x1029adfe9`;
+   anything else falls into the normal loop at `0x1029b359c`. This
+   matches source exactly: `if (L->singlestep) luau_execute<true>(L);
+   else luau_execute<false>(L);`
+2. The normal path tests a global hook flag and runs the hook
+   (`CALL [RAX+0x6f0]`) when set.
 3. It reads the first bytecode byte, loads the opcode jump table at
-   `0x1072d9230`, and enters the interpreter with `JMP [table + byte*8]` —
-   a computed goto, which is what defeated the decompiler.
+   `0x1072d9230`, and enters the interpreter with `JMP [table + byte*8]`
+   — a computed goto, which is what defeated the decompiler. Calling
+   convention is `RDI` = thread.
 
 ```asm
 1029adfd3 PUSH RBP
-1029adfd7 CMP byte ptr [RDI+0x6],0x1
-1029adfdb JNZ 0x1029adfe3       ; fresh-call path
+1029adfd7 CMP byte ptr [RDI+0x6],0x1   ; singlestep?
+1029adfdb JNZ 0x1029adfe3       ; normal loop
 1029adfdd POP RBP
-1029adfde JMP 0x1029adfe9       ; resume path
-; fresh path at 0x1029b359c:
+1029adfde JMP 0x1029adfe9       ; single-step loop
+; normal path at 0x1029b359c:
 1029b35b8 TEST byte ptr [RAX+0x2c],0x4   ; hook flag?
-1029b35ca CALL qword ptr [RAX+0x6f0]     ; debug hook
+1029b35ca CALL qword ptr [RAX+0x6f0]     ; hook
 1029b3609 MOVZX EAX,byte ptr [R11]       ; first opcode byte
 1029b360d LEA R15,[0x1072d9230]          ; opcode jump table
 1029b3614 JMP qword ptr [R15+RAX*8]     ; enter interpreter loop
@@ -187,3 +210,12 @@ string references still exist elsewhere.
 - Exact helper names behind VM start / resume calls.
 - Interpreter loop bodies behind the `0x1072d9230` opcode table.
 - Full library open list vs flag-gated subsets per build.
+
+## A note on the address list
+
+30 sampled offsets from the address list (memory, GC, table, string,
+type, value, load, library, and state functions) were checked against
+this build's function-start table: every one lands exactly on a function
+entry. The list is a reliable *index* — the remaining work is confirming
+what each entry does, as done above for `spawn`, `luau_execute`, and
+the facet accessor. Names are still not a stable interface across builds.
