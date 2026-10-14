@@ -250,6 +250,35 @@ the Luau `pcall` builtin remain present.** Roblox's native ScriptContext paths
 also use their own protected VM helpers rather than requiring a public
 `lua_pcall` symbol.
 
+### Split RIP-pointer construction in selected Luau paths
+
+The MacPlayer also contains the selective pointer construction described in
+the accompanying offset research. A verified example is at
+`ram:0x102988254`, inside a Luau error path:
+
+```asm
+lea    rax, [rip+...]          ; dummy = 0x106c9c778
+mov    [rbp-0x18], rax
+mov    rsi, 0xffffffffffd06c00 ; signed delta = -0x2f9400
+add    rsi, [rbp-0x18]         ; rsi = 0x1069a3378, "stack limit"
+call   ram:0x1029940f4         ; luaG_runerror-shaped path
+```
+
+The dummy address is in `__unwind_info`; the reconstructed pointer lands in
+`__cstring`. The arithmetic is:
+
+```text
+0x106c9c778 + (-0x2f9400) = 0x1069a3378
+```
+
+This is distinct from ordinary compiler output such as `lea rsi,[rip+string]`.
+It can break naive string-reference scanners because the instruction that
+mentions the real string address is replaced by an immediate delta and a
+stack-mediated add. The pattern is selective: direct RIP-relative references
+still exist elsewhere, including ordinary Luau/engine strings, so it should be
+treated as a deliberate per-site pointer transformation rather than a global
+compiler ABI rule.
+
 ## Luau-side findings from the supplied function map
 
 The supplied RVAs were checked against the binary's linker function-start

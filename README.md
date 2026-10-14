@@ -127,6 +127,13 @@ is not absent: `luaB_pcall` (`0x10298b913`), `luaB_pcallrun`
 (`0x10298b946`), `luaD_rawrunprotected` (`0x102995084`), `luaD_throw`, and
 `luaG_runerror` are all present as exact Luau function starts.
 
+Selected Luau error paths also reconstruct strings through a split pointer.
+At `ram:0x102988254`, a dummy pointer in `__unwind_info` plus the signed delta
+`-0x2f9400` reconstructs `__cstring` address `0x1069a3378` (`"stack limit"`)
+before the `luaG_runerror`-shaped call. This is selective pointer
+transformation, not a universal compiler rule; direct RIP-relative string
+references remain elsewhere.
+
 ModuleScript `require` is stateful as well. The native path at
 `ram:0x10158dd88` checks security context, tracks per-VM module state, detects
 circular dependencies, rejects destroyed modules, and requires exactly one
