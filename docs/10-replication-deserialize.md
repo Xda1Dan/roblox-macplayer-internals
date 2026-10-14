@@ -8,9 +8,10 @@
 RakNet::RecvFromLoop  0x102d606da
   |  socket -> RakNet -> packet-return queue (split/ack/NAK handled inside RakNet)
   v
-Replicator::OnReceive  0x10561fb20
+Replicator::OnReceive  0x10561fb20 (client; server: 0x105682678 / 0x1056843e4)
   |  read message-ID byte -> dispatch table below
   |  0x15/0x16 connection, 0x1b physics, 0x81/0x83/0x86 replication
+  |  server handles 0x8d/0x8f/0x90/0x96/0x99/0x9c/0xa7 locally, forwards rest
   |  typed items via 0x1055fa738 (returns 2 = queued, 1 = inline, 0 = special)
   v
 buffered deserializer  0x10564dd3c  (0xde0 bytes, ~0xb98 frame)
@@ -171,6 +172,60 @@ creates the typed `Deserialized*Item` queue entries (new object, property
 change, delete, event invocation, join data). Every `returns 2` path ends
 there; that is why the deserializer at `0x10564dd3c` only ever sees
 typed records, never raw sockets.
+
+## 3. Server side — `0x105682678` and `0x1056843e4`
+
+**What they do:** the server's front door. Same message-ID switch shape as
+the client, but server-only IDs (join, auth, spawn, shared-string setup)
+are handled locally while everything else is forwarded to the
+client-style handler.
+
+The two entries are the same dispatch adapted to two packet layouts:
+`0x105682678` takes the flat-buffer form and delegates to `0x10561fb20`;
+`0x1056843e4` takes the packet-struct form and delegates to `0x105621556`
+(a near-clone of the client body using `0x1055fab6e` for enqueue).
+
+**Step by step**
+
+1. Read the message-ID byte and switch. IDs `0x87/0x88/0x8b/0x8c` pass a
+   gate first; failures return `0`.
+2. `0x8d` (terrain): a game server rejects client terrain packets —
+   logs `TerrainRecvOnGameServer` / `Received a Terrain packet from a
+   Client on a GameServer` and disconnects (`0x104`). Returns `0`.
+3. `0x8f` (spawn name): decodes and stores the initial spawn name
+   (`[DFLog::NetworkJoin] initialSpawnName: %s`). Returns `0`.
+4. `0x90` (join request, the largest case): checks the Luau version
+   callers request (`Unsupported Luau version requested...` on
+   mismatch), then creates the player (`FailedCreatePlayer` vs
+   player-create helpers, `ClientPreloadedVersion` logging). Failure
+   disconnects with `0x106`. Returns `0`.
+5. `0x96` decodes a bool plus count and dispatches through a function
+   table. `0x99` is flag-gated. `0x9c` runs its handler and returns `1`.
+   `0xa7` (shared-string hash) processes the triple, or fatally traps on
+   flood (`Too many shared string hash packets`).
+6. `0x0e`/`0x0f`/`0x13`/`0x15`/`0x16` run small pre-hooks (connection
+   bookkeeping) and either return or forward. IDs `0x92`, `0x9e`, `0x9f`,
+   `0xa0`, `0xa2`, `0xa3`, `0xa4` are swallowed (return `0`, no forward).
+7. Everything else is forwarded to the client handler, whose return value
+   (`0`/`1`/`2`) becomes this function's return.
+
+Behavior in code form:
+
+```cpp
+// Simplified illustration.
+int serverOnReceive(Server* s, Packet p) {
+  switch (p.messageId()) {
+    case 0x8d: return rejectClientTerrain(s, p);  // 0
+    case 0x8f: return storeSpawnName(s, p);       // 0
+    case 0x90: return handleJoin(s, p);           // 0
+    case 0x9c: return handleData(s, p);           // 1
+    case 0xa7: return handleSharedString(s, p);   // 0 or fatal
+    case 0x92: case 0x9e: case 0x9f: case 0xa0:    // swallowed
+    case 0xa2: case 0xa3: case 0xa4: return 0;
+    default: return clientOnReceive(s, p);        // 0/1/2
+  }
+}
+```
 
 ## Unknowns
 
