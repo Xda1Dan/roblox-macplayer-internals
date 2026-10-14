@@ -290,6 +290,12 @@ against Luau source semantics (tag constants match source exactly:
 | 79 | `0x1029b3b7c` | multi-value copy plus SIMD tag validation, top adjust — unidentified (return/vararg-list shaped) | — |
 | 80 | `0x1029b66fb` | nil-or-false test, skip-or-fall-through — JUMPIFNOT | 26 |
 | 83 | `0x1029b6314` | number negate (sign-flip via per-build masks), tag-method `0xf` (UNM) fallback — MINUS | 51 |
+| 116 | `0x1029b4014` | builtin-ID dispatch via `0x1072d74e0` with frame args — FASTCALL family | 68-ish |
+| 117 | `0x1029b69b7` | interrupt hook + GC step, then numeric step/limit/exit — FORNLOOP | 57 |
+| 118 | `0x1029b8b9f` | 2 bytes: trap only — permanently invalid slot, not an opcode | — |
+| 120 | `0x1029b411c` | table fast path plus full slow path with userdata/object handling (`luaV_gettable`) — GETTABLE | 13 |
+| 125 | `0x1029b45da` | builtin-ID dispatch with constant-table args and arg-count 2 — FASTCALL2K-leaning | 75 |
+| 127 | `0x1029b46b0` | per-tag method table (`global+0x960`, `0x48` stride) userdata call with marshaling — exact opcode unidentified, possibly engine-extended fast path | — |
 
 Every identified slot differs from its stock position (exact stock:
 CALL 21, ADD 33, MUL 35, POW 38, FORNPREP 56), so the shuffle is
