@@ -46,6 +46,8 @@ offset is converted to a virtual address by adding `0x100000000`.
    assembly walkthrough, ring buffer, virtual step/stop, node pool.
 4. **[Luau VM lifecycle](docs/09-luau-vm-lifecycle.md)** — `lua_newstate`,
    VM wrapper, protected calls, split-pointer hardening.
+5. **[Replication deserialize path](docs/10-replication-deserialize.md)** —
+   queue drain loop, temp records, time budgets, handoff to the replicator.
 5. **[DataModel](docs/01-datamodel.md)** — the per-session root, services,
    lifetime states, reflection, and teardown ordering.
 6. **[Scripting and Luau reference](docs/02-scripting-luau.md)** — full
@@ -62,7 +64,7 @@ offset is converted to a virtual address by adding `0x100000000`.
 
 ### How to read a deep-dive doc
 
-Each of `07`, `08`, `09` follows the same shape:
+Each of `07`, `08`, `09`, `10` follows the same shape:
 
 ```text
 What it does (plain English, 3-5 lines)
