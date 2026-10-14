@@ -339,11 +339,11 @@ against Luau source semantics (tag constants match source exactly:
 | 209 | `0x1029b5fc8` | constant-divided-by-register doubles — DIVRK | 72 |
 | 210 | `0x1029b600e` | nil/false/else to boolean, no jump — NOT | 50 |
 | 216 | `0x1029b5e8c` | tag-dispatch table, inverted sense of JUMPIFEQ — JUMPIFNOTEQ | 30 |
-| 219 | `0x1029b5abe` | stack-headroom check plus step, fallthrough dispatch — unidentified trampoline | — |
+| 219 | `0x1029b5abe` | open-upvalue null check plus range compare guarding a close call, single-word fallthrough — CLOSEUPVALS | 11 |
 | 220 | `0x1029b79fb` | constant-times-register with tag-method `0xa` (MUL) fallback — MULK | 41 |
 | 222 | `0x1029b7b3c` | number and vector add fast paths, tag-method `0x8` (ADD) fallback — ADD | 33 |
 | 227 | `0x1029b5216` | single stack-arg builtin call — FASTCALL1-leaning | 73 |
-| 231 | `0x1029b6bdc` | table/const/reg write via helper — SETTABLEKS-leaning, medium-low | 16 |
+| 231 | `0x1029b6bdc` | class/member-name/value triple into a class-member helper, straight-line two-word — NEWCLASSMEMBER | 86 |
 | 235 | `0x1029b6731` | register-minus-constant doubles — SUBK | 40 |
 | 236 | `0x1029b5d10` | AUX-key hashed store with predicted slot, patch-C, `__newindex` path — SETTABLEKS (second slot with this shape alongside slot 74; see notes) | 16 |
 | 238 | `0x1029b5f46` | nil-test with sign flag — JUMPXEQKNIL | 77 |
@@ -378,10 +378,13 @@ separate. Both rows say so explicitly.
 ## Unknowns
 
 - Exact helper names behind VM start / resume calls.
-- Interpreter loop bodies behind the `0x1072d9230` opcode table.
-  Twin tables exist (`0x1072d8a30` single-step, `0x1072d9230` normal),
-  each with 93 non-zero slots in identical positions but different
-  handlers; the slot order does not match stock `LOP_*` order.
+- Stock opcodes with no slot found yet: SETGLOBAL (8), COVERAGE (69),
+  CAPTURE (70), GETUDATAKS (83), CMPPROTO (88), FASTPCALL (89). CAPTURE
+  is plausibly consumed inline by the closure handlers (like the AUX
+  words other handlers read directly); the rest may hide in the few
+  unidentified slots or in shared-trampoline shapes.
+- The slot-22 probe trampoline and the slot-74/slot-236 store pair:
+  one open question each (see notes).
 - Full library open list vs flag-gated subsets per build.
 
 ## A note on the address list
