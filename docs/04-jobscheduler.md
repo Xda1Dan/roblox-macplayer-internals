@@ -100,6 +100,26 @@ The diagnostic at `ram:0x102ee6a60` walks active jobs and prints name,
 state, and elapsed seconds. Limits exist for jobs, arbiters, deadlines,
 threads, stack sizes, and per-cycle budgets.
 
+## Worker pop and run
+
+The worker side mirrors enqueue. At `ram:0x102eeac76` (`TS::Reschedule`
+region) the worker locks the same queue record enqueue inserts into
+(`+0x1b0`), pops the next job, and promotes its weak reference with
+`shared_weak_count::lock`. An expired job simply never runs. The live job
+goes through `ram:0x102ee3332`, which re-checks the lock state and makes
+the virtual step call at vtable offset `+0x10`.
+
+```cpp
+// Simplified illustration.
+void workerPopAndRun(QueueRecord& rec) {
+  std::unique_lock lock(rec.mutex);   // +0x1b0 record
+  auto weak = rec.tryPop();
+  lock.unlock();
+  if (auto job = weak.lock())         // weak -> shared promote
+    job->step(stats);                 // virtual dispatch
+}                                     // shared release on scope exit
+```
+
 Behavior in code form:
 
 ```cpp
@@ -132,6 +152,8 @@ offsets.
 | Job start | `ram:0x102eec6da` |
 | Job stop | `ram:0x102eec76c` |
 | Node allocator | `ram:0x102ee3136` |
+| Worker pop | `ram:0x102eeac76` |
+| Worker dispatch | `ram:0x102ee3332` |
 | Job diagnostics | `ram:0x102ee6a60` |
 
 ## What is not claimed

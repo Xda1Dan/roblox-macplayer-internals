@@ -19,6 +19,8 @@ worker: arbiter → virtual step (+0x10) → virtual stop (+0x18)
   │  ram:0x102eec6da  JobStart wrapper
   │  ram:0x102eec76c  JobStop wrapper (timing + arbiter update)
   │  ram:0x102ee3136  bounded node allocator (exhaustion = fatal)
+  │  ram:0x102eeac76  worker pop: lock +0x1b0 record, weak→shared promote
+  │  ram:0x102ee3332  dispatch: lock check + virtual step call
 ```
 
 ---
@@ -164,6 +166,44 @@ pool.release(n);
 ```
 
 ---
+
+## 4. Worker pop and run — `ram:0x102eeac76` via `ram:0x102ee3332`
+
+**What it does:** the worker-side mirror of enqueue. Lock the same queue
+record (`+0x1b0`), pop the next job, promote its weak reference to shared,
+and dispatch through the virtual step call.
+
+**Step by step**
+
+1. Open a `TS::Reschedule` region and lock the queue record at `+0x1b0` —
+   the same record enqueue inserts into.
+2. Promote the job's weak reference with `shared_weak_count::lock`. If the
+   job died while queued, there is nothing to run.
+3. Call `ram:0x102ee3332` with the job and its context. That routine
+   re-checks the job lock state, then makes the virtual step call at
+   vtable offset `+0x10` (the same call the start wrapper makes).
+4. Release the shared reference (`XADD.LOCK` decrement, destroy on last),
+   unlock the queue record, close the region.
+
+**Simplified reconstruction**
+
+```cpp
+// Original illustration of the worker pop path.
+void workerPopAndRun(QueueRecord& rec) {
+  auto region = profile("TS::Reschedule");
+  std::unique_lock lock(rec.mutex);          // +0x1b0 record
+  auto job = rec.tryPopWeak();               // may be expired
+  lock.unlock();
+  if (!job) return;
+  if (auto shared = job->weak.lock()) {      // weak -> shared promote
+    runJob(*shared);                         // virtual step (+0x10)
+  }                                          // shared release on scope exit
+}
+```
+
+The full submit-to-run ownership story is therefore: submit copies shared
+refs in, the queue holds a weak, the worker promotes weak back to shared
+to run, and every temp copy is released exactly once.
 
 ## Patterns to recognize everywhere
 

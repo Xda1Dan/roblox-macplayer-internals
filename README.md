@@ -180,7 +180,10 @@ maintenance all become scheduled work:
 start at `ram:0x102eec6da` marks a job active and calls its step function.
 Job stop clears the active state, calls the stop hook, records elapsed
 time, and updates the arbiter. Node allocation at `ram:0x102ee3136` uses a
-bounded pool. Running out of nodes is fatal.
+bounded pool. Running out of nodes is fatal. Workers pop from the same
+queue record enqueue writes to, promote the queued weak reference back to
+shared (`ram:0x102eeac76`), and dispatch through `ram:0x102ee3332` — a job
+that dies while queued simply never runs.
 
 Shutdown drains waiting threads and yield waiters before destroying
 scheduler members. The VM collection then releases per-slot state. Work
