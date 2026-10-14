@@ -6,37 +6,37 @@
 
 ```
 Instance (Script / LocalScript / ModuleScript)
-  │  ram:0x10142a7a6  admission predicate
+  │  0x10142a7a6  admission predicate
   ▼
 source (ProtectedString) or bytecode asset
-  │  ram:0x101593650  compilation-cache boundary
-  │  ram:0x10159502e  policy gate (restricted / malicious)
+  │  0x101593650  compilation-cache boundary
+  │  0x10159502e  policy gate (restricted / malicious)
   ▼
 execution record
-  │  ram:0x10158cc58  init
-  │  ram:0x10158ac46  start path (re-entrancy ≤ 3, "Script Start" scope)
+  │  0x10158cc58  init
+  │  0x10158ac46  start path (re-entrancy ≤ 3, "Script Start" scope)
   ▼
 VM collection thread
-  │  ram:0x1015b92cd  creates/owns lua_State, ram:0x10299fd5b lua_newstate
+  │  0x1015b92cd  creates/owns lua_State, 0x10299fd5b lua_newstate
   ▼
 Luau resume
-  │  ram:0x1015566d6  ScriptContextResume (deadline, C-stack, timing)
-  │  ram:0x101557e8c  async-callback entry (weak script check)
+  │  0x1015566d6  ScriptContextResume (deadline, C-stack, timing)
+  │  0x101557e8c  async-callback entry (weak script check)
   ▼
 yield / wait / complete / error
-  │  ram:0x1014cf74a  task.wait (no OS sleep)
-  │  ram:0x1015977c1  coroutine admission gate
-  │  ram:0x10158dd88  require state machine
+  │  0x1014cf74a  task.wait (no OS sleep)
+  │  0x1015977c1  coroutine admission gate
+  │  0x10158dd88  require state machine
   ▼
-WaitingHybridScriptsJob  ram:0x1015a8d94 / 0x1015a9249
+WaitingHybridScriptsJob  0x1015a8d94 / 0x1015a9249
   │  bounded drain, deadline, atomic resume flag
   ▼
-teardown  ram:0x1015a7d1e → ram:0x1015bab74
+teardown  0x1015a7d1e → 0x1015bab74
 ```
 
 ---
 
-## 1. Admission — `ram:0x10142a7a6`
+## 1. Admission — `0x10142a7a6`
 
 **What it does:** answers “is this script allowed to start *here, now*?”
 before any VM is touched. RunContext, capability bits, ancestry, DataModel
@@ -46,7 +46,7 @@ state, and plugin/core special cases all feed one boolean.
 
 | | |
 |---|---|
-| entry | `ram:0x10142a7a6` |
+| entry | `0x10142a7a6` |
 | size | `0x3b9` bytes |
 | callers | script-start path, plugin restart path |
 | emits | `Cannot start {client,server} script '%s' (lacking capability …)` |
@@ -106,7 +106,7 @@ bool admitsScript(const ScriptRecord& s, Ctxt& c) {
 
 ---
 
-## 2. Start — `ram:0x10158ac46`
+## 2. Start — `0x10158ac46`
 
 **What it does:** turns an admitted script into a running VM thread:
 log it, guard re-entrancy, open a profiling scope, build the VM-facing
@@ -116,7 +116,7 @@ objects, invoke the start helper, install result/error continuations.
 
 | | |
 |---|---|
-| entry | `ram:0x10158ac46` |
+| entry | `0x10158ac46` |
 | size | `0xc70` bytes |
 | logs | `[FLog::ScriptContextAdd] LoaderFacet::addScript -- %s`, `Running script %p`, `Script Start` scope, `startScript re-entrancy has exceeded 3` |
 | covered here | start path, ownership, and continuations |
@@ -181,7 +181,7 @@ void startScript(ScriptContext& ctx, ScriptRecord& s) {
 
 ---
 
-## 3. Resume — `ram:0x1015566d6` (`ScriptContextResume`)
+## 3. Resume — `0x1015566d6` (`ScriptContextResume`)
 
 **What it does:** the single funnel every resume passes through: refresh
 metadata, check shutdown/deadline/C-stack, log the pending script, run the
@@ -191,7 +191,7 @@ VM, record timing.
 
 | | |
 |---|---|
-| entry | `ram:0x1015566d6` |
+| entry | `0x1015566d6` |
 | size | `0x814` bytes |
 | logs | `Resuming script: %p`, `Pending script name: %s` |
 | hard limits | C-stack depth `> 200` → `C stack overflow`; past shutdown deadline → refuse |
@@ -227,7 +227,7 @@ int resumeScript(ResumeCtx& r) {
 
 ---
 
-## 4. `task.wait` — `ram:0x1014cf74a`
+## 4. `task.wait` — `0x1014cf74a`
 
 **What it does:** yields the *current coroutine* until a deadline without
 ever blocking the OS thread. This is the function that makes
@@ -237,7 +237,7 @@ ever blocking the OS thread. This is the function that makes
 
 | | |
 |---|---|
-| entry | `ram:0x1014cf74a` |
+| entry | `0x1014cf74a` |
 | size | `0x246` bytes |
 | rejects | `task.wait is not available for AuroraScripts`, `thread is not yieldable` |
 | covered here | entry, inputs, and exits |
@@ -258,7 +258,7 @@ mental model of every Roblox scheduler/timing bug will be wrong. It is
 
 ---
 
-## 5. `require` — `ram:0x10158dd88`
+## 5. `require` — `0x10158dd88`
 
 **What it does:** stateful per-VM module cache with security checks,
 cycle detection, destruction invalidation, and exactly-one-value enforcement.
@@ -267,7 +267,7 @@ cycle detection, destruction invalidation, and exactly-one-value enforcement.
 
 | | |
 |---|---|
-| entry | `ram:0x10158dd88` |
+| entry | `0x10158dd88` |
 | size | `0x80e` bytes |
 | errors | RobloxScript↔non-RobloxScript mismatches, `.config` rejection, recursive-require diagnostic, `Requested module has been destroyed…`, `…experienced an error while loading`, `Module code did not return exactly one value`, `Unknown module state` |
 | covered here | entry, inputs, and exits |
@@ -305,13 +305,13 @@ Tuple require(Module& m, Vm& vm) {
 
 ## 6. Async callbacks + coroutine gate
 
-**`ram:0x101557e8c` — what it does:** resolves the implementing script
+**`0x101557e8c` — what it does:** resolves the implementing script
 through a *weak* reference first. Destroyed → `Script that implemented this
 callback has been destroyed while calling async callback`. Alive → build the
 `callAsyncCallback` scope, rebuild args/context, run the same VM machinery
 as a start, release all shared refs on every exit path.
 
-**`ram:0x1015977c1` — what it does:** admits only suspended/awaiting
+**`0x1015977c1` — what it does:** admits only suspended/awaiting
 coroutine states. Anything else →
 `ModuleScript cannot resume non-suspended awaiting coroutine`. This is what
 prevents double-resume of a running or finished coroutine.
@@ -329,12 +329,12 @@ via `0x1015a837c`.
 **Teardown — what it does, in order:**
 
 ```
-scheduler facet  ram:0x1015a7d1e
+scheduler facet  0x1015a7d1e
   YieldEvent->waiterCount → release resume claim →
   waitingThreads.size() → destroy queues/events → poison ~0x280 bytes
-VM collection  ram:0x1015bab74
+VM collection  0x1015bab74
   per-slot thread counts → release state/allocators → poison ~0x5e0 bytes
-DataModel close  ram:0x104542918
+DataModel close  0x104542918
   per-service container clearing (StarterPack, StarterPlayer, Chat,
   Lighting, ReplicatedStorage/First, ServerStorage, …)
 ```
@@ -347,16 +347,16 @@ that does is a use-after-free by construction.
 ## ScriptContext creation and destruction
 
 **What is established.** The destruction side is fully mapped at
-`ram:0x1015466d8`: facet teardown helpers run first, then the scheduler
-facet at `+0x128` (`ram:0x1015a7d1e`), then the VM collection at `+2`
-(`ram:0x1015bab74`), then a final release helper. Three related addresses
+`0x1015466d8`: facet teardown helpers run first, then the scheduler
+facet at `+0x128` (`0x1015a7d1e`), then the VM collection at `+2`
+(`0x1015bab74`), then a final release helper. Three related addresses
 form a triad with it:
 
 | Address | Role |
 |---|---|
-| `ram:0x101545276` | facet state machine: `+0x12a0` moves `1→2` (destroy the context at `+0x180`), then `→3`; any other state reports `Invalid Facet Access` |
-| `ram:0x1055d5e74` | facet accessor: state below `3` returns `context+0xdc0`, otherwise `Invalid Facet Access` |
-| `ram:0x1015466d8` | destructor body described above |
+| `0x101545276` | facet state machine: `+0x12a0` moves `1→2` (destroy the context at `+0x180`), then `→3`; any other state reports `Invalid Facet Access` |
+| `0x1055d5e74` | facet accessor: state below `3` returns `context+0xdc0`, otherwise `Invalid Facet Access` |
+| `0x1015466d8` | destructor body described above |
 
 **What is not established.** The exact construction call-site (which
 `operator new` size, which caller runs the facet constructors) was chased
@@ -373,9 +373,9 @@ with construction through a table rather than an inline address.
 
 | Flag | Reader |
 |---|---|
-| `LuauGcGoal` | `ram:0x1015609ba` region |
+| `LuauGcGoal` | `0x1015609ba` region |
 | `LuauGcGoalCore` | same region |
-| `LuauGcGoalStartup` / `LuauGcGoalNormal` | `ram:0x105273f8c` region |
+| `LuauGcGoalStartup` / `LuauGcGoalNormal` | `0x105273f8c` region |
 | `LuauGcStepMul`, `LuauGcStepSizeKb` | same region |
 
 These mirror Luau's `LUA_GCSETGOAL` / step-multiplier / step-size knobs.
@@ -385,9 +385,9 @@ these values into each fresh `global_State` was not isolated — flag
 so the application point stays unmapped.
 
 **What is established inside the VM.** The inline step trigger at
-`ram:0x1030d6217` shows Luau's own pacing: after a barrier-guarded write
+`0x1030d6217` shows Luau's own pacing: after a barrier-guarded write
 it compares stack top against the GC threshold and calls `luaC_step`
-(`ram:0x102996c06`) directly. Engine-level tuning sets the thresholds;
+(`0x102996c06`) directly. Engine-level tuning sets the thresholds;
 the VM enforces them on every allocation path without scheduler
 involvement.
 

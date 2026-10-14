@@ -5,15 +5,15 @@
 > budgets time, builds temp records, and hands them to the replicator.
 
 ```
-RakNet::RecvFromLoop  ram:0x102d606da
+RakNet::RecvFromLoop  0x102d606da
   |  socket -> RakNet -> packet-return queue (split/ack/NAK handled inside RakNet)
   v
-Replicator::OnReceive  ram:0x10561fb20
+Replicator::OnReceive  0x10561fb20
   |  read message-ID byte -> dispatch table below
   |  0x15/0x16 connection, 0x1b physics, 0x81/0x83/0x86 replication
   |  typed items via 0x1055fa738 (returns 2 = queued, 1 = inline, 0 = special)
   v
-buffered deserializer  ram:0x10564dd3c  (0xde0 bytes, ~0xb98 frame)
+buffered deserializer  0x10564dd3c  (0xde0 bytes, ~0xb98 frame)
   |  lock queue -> pop record -> timing/counters -> temp record
   |  -> replication queue -> budget check -> repeat or stop
   v
@@ -26,7 +26,7 @@ DataModel apply (ownership / Workspace-membership gated)
 
 ---
 
-## 1. Entry - ram:0x10564dd3c
+## 1. Entry - 0x10564dd3c
 
 **What it does:** drain loop for the deserialize job. Sets up a large
 scratch frame, locks the receive queue, snapshots queue cursors, then
@@ -37,7 +37,7 @@ budget/deadline.
 
 | | |
 |---|---|
-| entry | ram:0x10564dd3c |
+| entry | 0x10564dd3c |
 | size | 0xde0 bytes |
 | frame | `SUB RSP,0xb98` - large scratch for temp records + queue cursors |
 | locks | queue mutex at `RBX+0x188` (`0x10320983c` / unlock on exit paths) |
@@ -137,7 +137,7 @@ void deserializeDrain(Job* j) {
 - Ownership is explicit: temp records are stack-scoped, shared state uses
   atomic ref bumps, queue cursors are snapshots.
 
-## 2. OnReceive dispatch — `ram:0x10561fb20`
+## 2. OnReceive dispatch — `0x10561fb20`
 
 **What it does:** reads the first payload byte and routes the packet.
 Return code is the contract: `0` = special-cased, `1` = handled inline,
@@ -169,7 +169,7 @@ Return code is the contract: `0` = special-cased, `1` = handled inline,
 The handoff `0x1055fa738(replicator, &item)` is the single funnel that
 creates the typed `Deserialized*Item` queue entries (new object, property
 change, delete, event invocation, join data). Every `returns 2` path ends
-there; that is why the deserializer at `ram:0x10564dd3c` only ever sees
+there; that is why the deserializer at `0x10564dd3c` only ever sees
 typed records, never raw sockets.
 
 ## Unknowns

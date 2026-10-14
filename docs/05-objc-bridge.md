@@ -20,9 +20,9 @@ Key Lua-start callbacks:
 
 | Callback | Address |
 |---|---|
-| `appLuaWillStartWithDataModel:` | `ram:0x10003913e` |
-| `ugcGameLuaWillStartWithDataModel:` | `ram:0x100038e3c` |
-| shared Lua-start core | `ram:0x100038f12` |
+| `appLuaWillStartWithDataModel:` | `0x10003913e` |
+| `ugcGameLuaWillStartWithDataModel:` | `0x100038e3c` |
+| shared Lua-start core | `0x100038f12` |
 
 ## Rendering and input
 
@@ -39,8 +39,8 @@ Key Lua-start callbacks:
 
 ## Web and Lua bridge
 
-- `EmbeddedWebView` (90): `notifyLuaFocusedIfNeeded` (`ram:0x10000cdd2`)
-  and unfocused variant, `didReceiveScriptMessage` (`ram:0x10000e295`),
+- `EmbeddedWebView` (90): `notifyLuaFocusedIfNeeded` (`0x10000cdd2`)
+  and unfocused variant, `didReceiveScriptMessage` (`0x10000e295`),
   auth-cookie sync, purchases, navigation policy, setup and layout.
 - `RBMessageBus` (24) plus subscription and request contracts, plus
   identity, SMS, contacts, experience, experimentation, linking,
@@ -83,8 +83,8 @@ handlers, local storage manager, web-view open parameters.
 
 ## Addresses in this build
 
-63 classes live in `__objc_classlist`. Method addresses are `ram:`
-values. The check mark below means the body is covered in the address
+63 classes live in `__objc_classlist`. Method addresses are virtual
+addresses. The check mark below means the body is covered in the address
 ledger.
 
 - `appLuaWillStartWithDataModel:` `0x10003913e` ✓

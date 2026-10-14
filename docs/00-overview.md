@@ -10,7 +10,7 @@ and address convention used everywhere else in this repository.
 |---|---|
 | File | `MacPlayer-version-f9247f9560044102/RobloxPlayer.app/Contents/MacOS/RobloxPlayer` |
 | Format | Mach-O 64-bit little-endian, `MH_EXECUTE`, x86_64, PIE |
-| Entry | file offset `0x41fe2` → `ram:0x100041fe2` |
+| Entry | file offset `0x41fe2` → `0x100041fe2` |
 | Code | `__TEXT` ≈ 110 MB across 13 sections; `__text` itself ≈ 96 MB |
 | Data | `__DATA` with `__const`, `__cfstring`, `__objc_*`, plus 25 sections |
 | Image base | `0x100000000` |
@@ -19,14 +19,14 @@ and address convention used everywhere else in this repository.
 | Symbols | 2275 symtab entries: 668 defined, 1606 undefined imports |
 | SHA-256 | `ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47` |
 
-Addresses in this repository are `ram:` addresses. For this build:
+Addresses in this repository are virtual addresses. For this build:
 
 ```text
 virtual address = file offset + 0x100000000
 ```
 
 Example: the string reference at file offset `0x68d7655` is address
-`ram:0x1068d7655`.
+`0x1068d7655`.
 
 ## Frameworks
 
@@ -62,12 +62,12 @@ Key app callbacks in this build:
 
 | Callback | Address |
 |---|---|
-| `appLuaWillStartWithDataModel:` | `ram:0x10003913e` |
-| `ugcGameLuaWillStartWithDataModel:` | `ram:0x100038e3c` |
-| shared Lua-start core | `ram:0x100038f12` |
-| `handleDeeplinkUrlV2` | `ram:0x1000376fd` |
-| `notifyLuaFocusedIfNeeded` | `ram:0x10000cdd2` |
-| `didReceiveScriptMessage` | `ram:0x10000e295` |
+| `appLuaWillStartWithDataModel:` | `0x10003913e` |
+| `ugcGameLuaWillStartWithDataModel:` | `0x100038e3c` |
+| shared Lua-start core | `0x100038f12` |
+| `handleDeeplinkUrlV2` | `0x1000376fd` |
+| `notifyLuaFocusedIfNeeded` | `0x10000cdd2` |
+| `didReceiveScriptMessage` | `0x10000e295` |
 
 ## A note on names
 

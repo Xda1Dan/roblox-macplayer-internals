@@ -8,13 +8,13 @@ stack.
 
 ## Layers, outside in
 
-1. **Join** — protocol URL, `handleDeeplinkUrlV2` (`ram:0x1000376fd`),
+1. **Join** — protocol URL, `handleDeeplinkUrlV2` (`0x1000376fd`),
    session via `0x1051e5369`, plus join stats and avatar metrics.
 2. **Transport** — `NetworkClient` over `RbxTransport` (connections,
    listeners, slots, TLS, QUIC, channel tracking), RakNet underneath
    (connect and packet traces, join-or-disconnect requests, ping stages).
-3. **Receive** — `RakNet::RecvFromLoop` (`ram:0x102d606da`) feeds a
-   packet-return queue. The buffered deserializer (`ram:0x10564dd3c`)
+3. **Receive** — `RakNet::RecvFromLoop` (`0x102d606da`) feeds a
+   packet-return queue. The buffered deserializer (`0x10564dd3c`)
    drains it, updates receive timing and queue counters, builds typed
    temporary records, and hands them to replication processing. Work can
    stop or defer on budget. Related counters: `AvgTimeSpentInDeserializeQueue`,
@@ -106,11 +106,11 @@ stage boundaries only. See `include/rbx/replicator.hpp`.
 
 | Place | Address |
 |---|---|
-| Deeplink handler | `ram:0x1000376fd` |
-| Session accessor | `ram:0x1051e5369` |
-| Receive loop | `ram:0x102d606da` |
-| Buffered deserializer | `ram:0x10564dd3c` |
-| Cross-thread wake | `ram:0x102ee57de` |
+| Deeplink handler | `0x1000376fd` |
+| Session accessor | `0x1051e5369` |
+| Receive loop | `0x102d606da` |
+| Buffered deserializer | `0x10564dd3c` |
+| Cross-thread wake | `0x102ee57de` |
 
 ## What is not claimed
 

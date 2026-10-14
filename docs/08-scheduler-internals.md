@@ -7,25 +7,25 @@
 
 ```
 caller (holds scheduler + payload of shared_ptrs)
-  │  ram:0x10521311e  build 0x30-byte job (vtable 0x10742d0f0)
+  │  0x10521311e  build 0x30-byte job (vtable 0x10742d0f0)
   ▼
-ram:0x104f54dc6  copy + dispatch to queue index
+0x104f54dc6  copy + dispatch to queue index
   ▼
-ram:0x104f54c96  lock shard mutex → copy item → ring insert → wake
-  │  ├─ ram:0x104f54876 → ram:0x104545ba0  ring buffer growth/copy
-  │  └─ ram:0x102ee57de  cross-thread wake (+ AppKit bounce)
+0x104f54c96  lock shard mutex → copy item → ring insert → wake
+  │  ├─ 0x104f54876 → 0x104545ba0  ring buffer growth/copy
+  │  └─ 0x102ee57de  cross-thread wake (+ AppKit bounce)
   ▼
 worker: arbiter → virtual step (+0x10) → virtual stop (+0x18)
-  │  ram:0x102eec6da  JobStart wrapper
-  │  ram:0x102eec76c  JobStop wrapper (timing + arbiter update)
-  │  ram:0x102ee3136  bounded node allocator (exhaustion = fatal)
-  │  ram:0x102eeac76  worker pop: lock +0x1b0 record, weak→shared promote
-  │  ram:0x102ee3332  dispatch: lock check + virtual step call
+  │  0x102eec6da  JobStart wrapper
+  │  0x102eec76c  JobStop wrapper (timing + arbiter update)
+  │  0x102ee3136  bounded node allocator (exhaustion = fatal)
+  │  0x102eeac76  worker pop: lock +0x1b0 record, weak→shared promote
+  │  0x102ee3332  dispatch: lock check + virtual step call
 ```
 
 ---
 
-## 1. Enqueue — `ram:0x104f54c96`
+## 1. Enqueue — `0x104f54c96`
 
 **What it does:** the entire “submit a job” operation in 0xf7 bytes:
 take the scheduler lock, pick the shard, copy the payload, append to the
@@ -35,7 +35,7 @@ ring, unlock, wake a worker, manage lifetimes.
 
 | | |
 |---|---|
-| entry | `ram:0x104f54c96` |
+| entry | `0x104f54c96` |
 | size | `0xf7` bytes, 71 instructions |
 | locks | `+0x778` mutex (`0x10320983c` lock / `0x103209848` unlock) |
 | queues | array at `+0x780`, stride `0x10` per index |
@@ -107,7 +107,7 @@ void enqueue(Scheduler* s, JobItem item, uint32_t index) {
 
 ---
 
-## 2. Ring buffer — `ram:0x104545ba0`
+## 2. Ring buffer — `0x104545ba0`
 
 **What it does:** grows/copies the 0x80-byte record ring. Capacity grows
 `cap*3/2` (min 4); placement is `((count + head) % capacity) * 0x80`.
@@ -137,15 +137,15 @@ void ringAppend(Ring& r, const Record* first, const Record* last) {
 
 ## 3. Run — virtual step/stop + node pool
 
-**`ram:0x102eec6da` (JobStart)** — mark active, log arbiter/timestamp,
+**`0x102eec6da` (JobStart)** — mark active, log arbiter/timestamp,
 `CALL [job+0x10]`. The scheduler never switches on job type; dispatch is
 one indirect call.
 
-**`ram:0x102eec76c` (JobStop)** — clear active, `CALL [job+0x18]`,
+**`0x102eec76c` (JobStop)** — clear active, `CALL [job+0x18]`,
 record elapsed/stop time, update arbiter, emit `JobStop` (+ per-thread
 diagnostic ring under profiling flags).
 
-**`ram:0x102ee3136` (node allocator)** — pull a node from the bounded
+**`0x102ee3136` (node allocator)** — pull a node from the bounded
 pool, copy shared state with atomic incs, CAS-publish into the arbiter
 table. Exhaustion is fatal:
 
@@ -167,7 +167,7 @@ pool.release(n);
 
 ---
 
-## 4. Worker pop and run — `ram:0x102eeac76` via `ram:0x102ee3332`
+## 4. Worker pop and run — `0x102eeac76` via `0x102ee3332`
 
 **What it does:** the worker-side mirror of enqueue. Lock the same queue
 record (`+0x1b0`), pop the next job, promote its weak reference to shared,
@@ -179,7 +179,7 @@ and dispatch through the virtual step call.
    the same record enqueue inserts into.
 2. Promote the job's weak reference with `shared_weak_count::lock`. If the
    job died while queued, there is nothing to run.
-3. Call `ram:0x102ee3332` with the job and its context. That routine
+3. Call `0x102ee3332` with the job and its context. That routine
    re-checks the job lock state, then makes the virtual step call at
    vtable offset `+0x10` (the same call the start wrapper makes).
 4. Release the shared reference (`XADD.LOCK` decrement, destroy on last),

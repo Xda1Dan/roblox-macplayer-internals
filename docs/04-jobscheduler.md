@@ -7,7 +7,7 @@ and run by workers after an explicit wakeup.
 
 ## Submit path
 
-`ram:0x10521311e` → `0x104f54dc6` → `0x104f54c96`
+`0x10521311e` → `0x104f54dc6` → `0x104f54c96`
 
 1. The caller holds the scheduler singleton (`0x10520e072` →
    `0x107c54890`, initialized once) and a payload of shared pointers.
@@ -77,16 +77,16 @@ See `include/rbx/scheduler.hpp` and `src/jobqueue_demo.cpp`.
 
 ## Run and node pool
 
-The start wrapper at `ram:0x102eec6da` marks a job active, logs arbiter
+The start wrapper at `0x102eec6da` marks a job active, logs arbiter
 and start time, then calls the step function at vtable offset `+0x10`.
 Dispatch is polymorphic. There is no large switch over job types.
 
-The stop wrapper at `ram:0x102eec76c` clears the active bit, calls the
+The stop wrapper at `0x102eec76c` clears the active bit, calls the
 stop hook at `+0x18`, records elapsed and stop time, updates the arbiter,
 and emits `JobStop`. Profiling builds also record worker thread and job
 name in a bounded diagnostic ring.
 
-The allocator at `ram:0x102ee3136` takes a free node from a bounded pool,
+The allocator at `0x102ee3136` takes a free node from a bounded pool,
 copies shared job state with atomic increments, updates a
 deadline-like atomic value, and publishes through an indexed table with
 locked compare-and-exchange behavior. Exhaustion is fatal:
@@ -96,17 +96,17 @@ Out of job nodes. Check for job leaks and/or increase the
 FInt::TaskSchedulerMaxNumOfJobs value
 ```
 
-The diagnostic at `ram:0x102ee6a60` walks active jobs and prints name,
+The diagnostic at `0x102ee6a60` walks active jobs and prints name,
 state, and elapsed seconds. Limits exist for jobs, arbiters, deadlines,
 threads, stack sizes, and per-cycle budgets.
 
 ## Worker pop and run
 
-The worker side mirrors enqueue. At `ram:0x102eeac76` (`TS::Reschedule`
+The worker side mirrors enqueue. At `0x102eeac76` (`TS::Reschedule`
 region) the worker locks the same queue record enqueue inserts into
 (`+0x1b0`), pops the next job, and promotes its weak reference with
 `shared_weak_count::lock`. An expired job simply never runs. The live job
-goes through `ram:0x102ee3332`, which re-checks the lock state and makes
+goes through `0x102ee3332`, which re-checks the lock state and makes
 the virtual step call at vtable offset `+0x10`.
 
 ```cpp
@@ -143,18 +143,18 @@ offsets.
 
 | Place | Address |
 |---|---|
-| Scheduler singleton | `ram:0x10520e072` → `0x107c54890` |
-| Job build | `ram:0x10521311e` |
-| Job dispatch | `ram:0x104f54dc6` |
-| Enqueue | `ram:0x104f54c96` |
-| Ring insert | `ram:0x104f54876` → `0x104545ba0` |
-| Wake | `ram:0x102ee57de` |
-| Job start | `ram:0x102eec6da` |
-| Job stop | `ram:0x102eec76c` |
-| Node allocator | `ram:0x102ee3136` |
-| Worker pop | `ram:0x102eeac76` |
-| Worker dispatch | `ram:0x102ee3332` |
-| Job diagnostics | `ram:0x102ee6a60` |
+| Scheduler singleton | `0x10520e072` → `0x107c54890` |
+| Job build | `0x10521311e` |
+| Job dispatch | `0x104f54dc6` |
+| Enqueue | `0x104f54c96` |
+| Ring insert | `0x104f54876` → `0x104545ba0` |
+| Wake | `0x102ee57de` |
+| Job start | `0x102eec6da` |
+| Job stop | `0x102eec76c` |
+| Node allocator | `0x102ee3136` |
+| Worker pop | `0x102eeac76` |
+| Worker dispatch | `0x102ee3332` |
+| Job diagnostics | `0x102ee6a60` |
 
 ## What is not claimed
 

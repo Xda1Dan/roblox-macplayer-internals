@@ -12,7 +12,7 @@ This page is the catalog. The step-by-step walkthrough lives in
 1. **Write** — `Script`, `LocalScript`, `ModuleScript`, `CoreScript`.
 2. **Permission check** — `RunContext` (Server, Client, Plugin, Legacy),
    `RunClientScript` / `RunServerScript` capabilities, security identity,
-   ancestry, DataModel state. Decided at `ram:0x10142a7a6`.
+   ancestry, DataModel state. Decided at `0x10142a7a6`.
 3. **Wrap** — source travels as `ProtectedString`, not a raw `char*`.
 4. **Load** — `LoaderFacet`: `addScript`, `removeScript`, `requireModule`,
    `loadModuleScriptFromInstance` / `FromAssetId` / `FromRbxLibraryPath`,
@@ -25,11 +25,11 @@ This page is the catalog. The step-by-step walkthrough lives in
    `SharedCodeGenContext`.
 7. **Schedule** — `ExecutorFacet::callInNewThread` and `callAsyncCallback`
    place closures on threads from the VM pool.
-8. **Start and resume** — start at `ram:0x10158ac46` (at most three levels
+8. **Start and resume** — start at `0x10158ac46` (at most three levels
    of re-entrant start, `Script Start` region, VM handoff, shared
-   ownership across callbacks). Resume through `ram:0x1015566d6`
+   ownership across callbacks). Resume through `0x1015566d6`
    (pending-name log, shutdown deadline, C-stack limit of 200, timing).
-   Waiting drain at `ram:0x1015a8d94` / `ram:0x1015a9249` (one resume
+   Waiting drain at `0x1015a8d94` / `0x1015a9249` (one resume
    flag, bounded drain, deadline, per-waiter release). Yielding calls
    suspend through `BoundYieldFuncDesc`, `CallYieldHelper`,
    `YieldFunctionState`.
@@ -65,24 +65,24 @@ Policy words in this build include `Plugin`, `LocalUser`, `WritePlayer`,
 
 ## Loading details
 
-- `ram:0x101593650` is the compilation-cache boundary. It builds a
+- `0x101593650` is the compilation-cache boundary. It builds a
   Luau-facing value, reads compact or out-of-line string storage, asks a
   helper for cached or compiled data, and can fail with `Unexpected type
   in script compilation cache.`
-- `ram:0x10159502e` is an early policy gate with `scriptClass` and
+- `0x10159502e` is an early policy gate with `scriptClass` and
   `script` diagnostics: `Script "{}" was blocked from being ran under a
   restricted container.` and `detected as malicious. ... will not run.`
-- `ram:0x10158cc58` fills in the execution record: compact fields,
+- `0x10158cc58` fills in the execution record: compact fields,
   shared references, flags from script and context, inherited limits and
   identity.
-- `loadstring` at `ram:0x1014c86c8` is policy-gated. It can answer
+- `loadstring` at `0x1014c86c8` is policy-gated. It can answer
   `loadstring() is not available` or `loadstring() is not available in
   RobloxScript context.` When allowed, it still goes through the engine
   compile and load helpers.
 
 ## Require
 
-`ram:0x10158dd88` is a stateful per-VM module cache:
+`0x10158dd88` is a stateful per-VM module cache:
 
 - incompatible RobloxScript combinations fail first;
 - `.config` modules cannot be required directly;
@@ -97,12 +97,12 @@ Policy words in this build include `Plugin`, `LocalUser`, `WritePlayer`,
 
 ## Callbacks and coroutines
 
-- `ram:0x101557e8c` resolves the implementing script through a weak
+- `0x101557e8c` resolves the implementing script through a weak
   reference. Destroyed scripts fail with `Script that implemented this
   callback has been destroyed while calling async callback.` Survivors get
   a `callAsyncCallback` scope, rebuilt arguments, and the same VM path as
   a start. All exits release shared references.
-- `ram:0x1015977c1` only accepts suspended / awaiting coroutines.
+- `0x1015977c1` only accepts suspended / awaiting coroutines.
   Anything else reports `ModuleScript cannot resume non-suspended
   awaiting coroutine`.
 
@@ -159,25 +159,25 @@ The public name `lua_pcall` is absent. The machinery is present:
 
 | Address | Role |
 |---|---|
-| `ram:0x10298b913` | `luaB_pcall`: frame setup, protected call, status convert |
-| `ram:0x10298b946` | `luaB_pcallrun`: stack-result continuation |
-| `ram:0x102995084` | protected-execution boundary |
-| `ram:0x102995125` | throw path, via C++ exception in this build |
-| `ram:0x1029940f4` | error build and propagate |
+| `0x10298b913` | `luaB_pcall`: frame setup, protected call, status convert |
+| `0x10298b946` | `luaB_pcallrun`: stack-result continuation |
+| `0x102995084` | protected-execution boundary |
+| `0x102995125` | throw path, via C++ exception in this build |
+| `0x1029940f4` | error build and propagate |
 
 ScriptContext paths use their own protected helpers as well.
 
 ## Split string pointers
 
 Some Luau error paths do not reference their string directly. At
-`ram:0x102988254`:
+`0x102988254`:
 
 ```asm
 lea    rax, [rip+...]           ; dummy = 0x106c9c778
 mov    [rbp-0x18], rax
 mov    rsi, 0xffffffffffd06c00  ; delta = -0x2f9400
 add    rsi, [rbp-0x18]          ; rsi = 0x1069a3378, "stack limit"
-call   ram:0x1029940f4
+call   0x1029940f4
 ```
 
 ```text
@@ -208,24 +208,24 @@ packages a wake deadline, queues the resume, and returns to the VM.
 
 ### Task library
 
-The `task` table is registered at `ram:0x1014cebe0`, which pairs each name
+The `task` table is registered at `0x1014cebe0`, which pairs each name
 with its backing function:
 
 | Lua name | Address | Behavior |
 |---|---|---|
-| `synchronize` | `ram:0x1014cedfe` | only from an Actor-descendant script, else `task.synchronize() may only be called from a script that is a descendant of an Actor` |
-| `desynchronize` | `ram:0x1014ceec6` | same Actor gate |
-| `defer` | `ram:0x1014cef92` | shared spawn/delay/wait core: Aurora rejection, re-entrancy cap (`Maximum re-entrancy depth (%i) exceeded calling task.defer`), deferred-growth guard (`Exponential deferred event growth detected calling task.defer`) |
-| `spawn` | `ram:0x1014cf416` | Aurora-gated, serializes arguments, schedules a new thread |
-| `delay` | `ram:0x1014cf56a` | spawn plus a wake time, then the same wait path |
-| `wait` | `ram:0x1014cf74a` | marks the coroutine waiting, timed resume, no OS sleep |
-| `cancel` | `ram:0x1014cf880` | `cannot cancel thread` unless it owns a live thread |
+| `synchronize` | `0x1014cedfe` | only from an Actor-descendant script, else `task.synchronize() may only be called from a script that is a descendant of an Actor` |
+| `desynchronize` | `0x1014ceec6` | same Actor gate |
+| `defer` | `0x1014cef92` | shared spawn/delay/wait core: Aurora rejection, re-entrancy cap (`Maximum re-entrancy depth (%i) exceeded calling task.defer`), deferred-growth guard (`Exponential deferred event growth detected calling task.defer`) |
+| `spawn` | `0x1014cf416` | Aurora-gated, serializes arguments, schedules a new thread |
+| `delay` | `0x1014cf56a` | spawn plus a wake time, then the same wait path |
+| `wait` | `0x1014cf74a` | marks the coroutine waiting, timed resume, no OS sleep |
+| `cancel` | `0x1014cf880` | `cannot cancel thread` unless it owns a live thread |
 
 A label reading `task.spawn = 0x14cff67` is wrong for this build:
-`ram:0x1014cff67` is a small error-string helper (returns `"unknown"` and
+`0x1014cff67` is a small error-string helper (returns `"unknown"` and
 related names), not the spawn implementation.
 
-State creation runs through `ram:0x1015b92cd`: allocator and context,
+State creation runs through `0x1015b92cd`: allocator and context,
 `lua_newstate` for `0x4d60` bytes, failure becomes `Failed to create Lua
 state`, then hooks, libraries, Roblox bindings, `_G`, sandbox and config,
 and the VM collection takes ownership. States belong to the collection.
@@ -233,17 +233,17 @@ Scripts borrow threads.
 
 A label such as `GetGlobalState = 0x55d5e74` is better read as a facet
 accessor here. A label reading `task.spawn = 0x14cff67` is wrong for this
-build: `ram:0x1014cff67` is an error-string helper, while the real
-`spawn` / `delay` / `defer` entries are `ram:0x1014cf416`,
-`ram:0x1014cf56a`, and `ram:0x1014cef92` (see the task library table
+build: `0x1014cff67` is an error-string helper, while the real
+`spawn` / `delay` / `defer` entries are `0x1014cf416`,
+`0x1014cf56a`, and `0x1014cef92` (see the task library table
 above). Labels are an index, not a stable interface.
 
 ## Native to Lua events
 
-- `notifyLuaFocusedIfNeeded` (`ram:0x10000cdd2`): builds
+- `notifyLuaFocusedIfNeeded` (`0x10000cdd2`): builds
   `AppInput` / `""` / `"Focused"` (`0x100016179`, 0x58 bytes), fires via
   `0x102ec8158` / `0x102ec81a0`.
-- `didReceiveScriptMessage` (`ram:0x10000e295`): message body to UTF-8 to
+- `didReceiveScriptMessage` (`0x10000e295`): message body to UTF-8 to
   engine string (SSO assign, `0x102d49d80`), lookup and dispatch
   (`0x104929a60`, `0x104f2965c`, global `0x10003ddee`), then
   `0x10520f486`.

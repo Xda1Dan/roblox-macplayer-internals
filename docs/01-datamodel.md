@@ -135,10 +135,10 @@ See `include/rbx/reflection.hpp` and `src/reflection_demo.cpp`.
 
 `Players` is a full service, not just a list.
 
-Events declared at `ram:0x100bae0c0` include `PlayerAdded`,
+Events declared at `0x100bae0c0` include `PlayerAdded`,
 `PlayerRemoving`, `PlayerConnecting`, `PlayerDisconnecting`,
 `PlayerRejoining`, `PlayerMembershipChanged`, and `PlayerChatted`.
-Operations declared at `ram:0x100bac24b` include `getPlayers`,
+Operations declared at `0x100bac24b` include `getPlayers`,
 `playerFromCharacter`, `ResetLocalPlayer`, user and thumbnail lookups,
 character-description creation, moderation and ban calls, and chat helpers.
 
@@ -175,7 +175,7 @@ Step by step, close does this:
 4. Release VM state only after the drains above.
 5. Release the DataModel itself.
 
-The close routine lives at `ram:0x104542918`. The exact service list is
+The close routine lives at `0x104542918`. The exact service list is
 build-specific and partly flag-gated.
 
 Behavior in code form:
@@ -197,12 +197,12 @@ C++ model: `include/rbx/datamodel.hpp`, demo in
 
 | Place | Address |
 |---|---|
-| Session accessor | `ram:0x1051e5369` |
-| Factory singleton | `ram:0x105235e96` → `0x107510308` |
-| Global manager | `ram:0x10118fab6` → `0x107a61588` |
-| Close routine | `ram:0x104542918` |
-| Players events | `ram:0x100bae0c0` |
-| Players operations | `ram:0x100bac24b` |
+| Session accessor | `0x1051e5369` |
+| Factory singleton | `0x105235e96` → `0x107510308` |
+| Global manager | `0x10118fab6` → `0x107a61588` |
+| Close routine | `0x104542918` |
+| Players events | `0x100bae0c0` |
+| Players operations | `0x100bac24b` |
 
 ## What is not claimed
 

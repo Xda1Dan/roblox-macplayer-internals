@@ -6,28 +6,28 @@
 
 ```
 allocator callback + context
-  |  ram:0x10299fd5b  lua_newstate (alloc 0x4d60, init, protected init)
+  |  0x10299fd5b  lua_newstate (alloc 0x4d60, init, protected init)
   v
 ScriptContext VM wrapper
-  |  ram:0x1015b92cd  caller: hooks + libraries + _G + sandbox + retain
+  |  0x1015b92cd  caller: hooks + libraries + _G + sandbox + retain
   v
 compile / load boundary
-  |  ram:0x1029a9f36  loadsafe-shaped protected load
+  |  0x1029a9f36  loadsafe-shaped protected load
   |  bytecode auth + "Invalid Bytecode." guards
   v
 protected execution
-  |  ram:0x10298b913  luaB_pcall wrapper
-  |  ram:0x102995084  luaD_rawrunprotected boundary
-  |  ram:0x102995125  luaD_throw (C++ exception in this build)
-  |  ram:0x1029940f4  luaG_runerror
-  |  ram:0x1029adfd3  luau_execute dispatch stub (singlestep check + jump table)
+  |  0x10298b913  luaB_pcall wrapper
+  |  0x102995084  luaD_rawrunprotected boundary
+  |  0x102995125  luaD_throw (C++ exception in this build)
+  |  0x1029940f4  luaG_runerror
+  |  0x1029adfd3  luau_execute dispatch stub (singlestep check + jump table)
   v
 selective pointer hardening (string-reference hardening)
 ```
 
 ---
 
-## 1. lua_newstate - ram:0x10299fd5b
+## 1. lua_newstate - 0x10299fd5b
 
 **What it does:** allocates a `0x4d60`-byte Luau state through the
 caller-supplied allocator, lays out global-state / main-thread / stack / GC
@@ -38,7 +38,7 @@ fields, then runs protected init. Null means the caller reports
 
 | | |
 |---|---|
-| entry | ram:0x10299fd5b |
+| entry | 0x10299fd5b |
 | size | 0x4a8 bytes |
 | args | (allocatorFn, allocatorCtx) - RDI = fn, RSI = ctx |
 | covered here | entry, inputs, and exits |
@@ -101,7 +101,7 @@ lua_State* newState(AllocFn alloc, void* ctx) {
 
 ---
 
-## 2. Wrapper - ram:0x1015b92cd
+## 2. Wrapper - 0x1015b92cd
 
 **What it does:** turns a raw state into a Roblox VM: install panic /
 interrupt / error hooks, open the restricted standard libraries, register
@@ -122,7 +122,7 @@ states.
 **Finding:** the public names `lua_pcall` / `lua_pcallk` are absent from
 the shipped symbol and string inventory. The machinery is present:
 
-| ram: | role |
+| address | role |
 |---|---|
 | 0x10298b913 | luaB_pcall builtin: frame prep, protected call, status convert |
 | 0x10298b946 | luaB_pcallrun stack-result continuation |
@@ -145,7 +145,7 @@ Checked against Luau source, the labels hold up:
 
 ### `luau_execute` is a dispatch stub
 
-`ram:0x1029adfd3` (0xfb bytes) is not the interpreter loop — it is the
+`0x1029adfd3` (0xfb bytes) is not the interpreter loop — it is the
 entry that selects *which* loop to enter. Cross-checked against Luau
 source (`lvmexecute.cpp`, `lstate.h`):
 
@@ -187,14 +187,14 @@ source (`lvmexecute.cpp`, `lstate.h`):
 already in `__TEXT` and `real = dummy + delta`. Simple string-reference scans that
 only match RIP-relative references to `__cstring` miss these.
 
-**Verified example - ram:0x102988254 (Luau error path)**
+**Verified example - 0x102988254 (Luau error path)**
 
 ```asm
 lea    rax, [rip+...]           ; dummy = 0x106c9c778 (__unwind_info)
 mov    [rbp-0x18], rax
 mov    rsi, 0xffffffffffd06c00  ; delta = -0x2f9400
 add    rsi, [rbp-0x18]          ; rsi = 0x1069a3378
-call   ram:0x1029940f4          ; luaG_runerror-shaped
+call   0x1029940f4          ; luaG_runerror-shaped
 ; [0x1069a3378] = "stack limit" (__cstring)
 ```
 

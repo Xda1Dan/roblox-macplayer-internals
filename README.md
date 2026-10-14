@@ -31,7 +31,7 @@ almost everything asynchronous runs as a job in the TaskScheduler
 | Image base | `0x100000000` |
 | SHA-256 | `ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47` |
 
-Addresses in these notes are written as `ram:` values. For this build,
+Addresses in these notes are virtual addresses. For this build,
 file offset + `0x100000000` = virtual address.
 
 ## How to read these notes
@@ -82,7 +82,7 @@ listings are original illustrations, not player source.
 The DataModel is the root of one game session. Join creates it. Network
 and script work hold weak or shared references to it. Close drains that
 work first, then clears service containers one by one, then releases
-script state. The close path at `ram:0x104542918` clears StarterPack,
+script state. The close path at `0x104542918` clears StarterPack,
 StarterPlayer, TextChatService, StarterGui, CoreGui, Teams, Lighting,
 ReplicatedStorage, ReplicatedFirst, ServerStorage, ServerScriptService,
 ChatService, and others.
@@ -106,13 +106,13 @@ Script instance
   -> later resume
 ```
 
-The start path at `ram:0x10158ac46` allows at most three levels of
+The start path at `0x10158ac46` allows at most three levels of
 re-entrant start, opens a `Script Start` region, hands off to a VM thread,
 and keeps shared ownership alive across callbacks. The waiting paths at
-`ram:0x1015a8d94` and `ram:0x1015a9249` claim one resume flag, drain a
+`0x1015a8d94` and `0x1015a9249` claim one resume flag, drain a
 bounded number of waiters, respect a deadline, and release each waiter.
 
-Permission is decided at `ram:0x10142a7a6`. Server scripts need the native
+Permission is decided at `0x10142a7a6`. Server scripts need the native
 `RunServerScript` capability. Client scripts need `RunClientScript`.
 Service location, ancestry, DataModel state, and plugin rules are checked
 as well. Lua code does not grant itself a higher level.
@@ -124,7 +124,7 @@ coroutine waiting and schedules a later resume. It does not sleep a worker
 thread. `ScriptContextResume` checks pending state, shutdown deadline, and
 a C-stack limit before re-entering.
 
-State creation runs through `ram:0x1015b92cd`: allocator and context,
+State creation runs through `0x1015b92cd`: allocator and context,
 `lua_newstate`, VM wrapper, error hooks, libraries and Roblox bindings,
 `_G` and sandbox setup, then the VM collection owns it. States belong to
 the collection. Scripts borrow threads from it.
@@ -135,18 +135,18 @@ The public name `lua_pcall` is absent, but protected execution is present:
 are all present as Luau function starts.
 
 Some Luau error paths build strings with a split pointer. At
-`ram:0x102988254`, a dummy pointer plus signed delta `-0x2f9400`
+`0x102988254`, a dummy pointer plus signed delta `-0x2f9400`
 reconstructs `0x1069a3378` (`"stack limit"`) before the
 `luaG_runerror`-shaped call. This is selective, not a general compiler
 rule. Direct string references still exist elsewhere.
 
-Module `require` at `ram:0x10158dd88` checks security context, tracks
+Module `require` at `0x10158dd88` checks security context, tracks
 per-VM module state, reports circular dependencies, rejects destroyed
 modules, and requires exactly one return value.
 
-Async callbacks at `ram:0x101557e8c` resolve the implementing script
+Async callbacks at `0x101557e8c` resolve the implementing script
 through a weak reference first. Destroyed scripts are rejected before any
-VM work. Coroutine resume at `ram:0x1015977c1` only accepts
+VM work. Coroutine resume at `0x1015977c1` only accepts
 suspended / awaiting states.
 
 ### RakNet moves bytes, the replicator interprets them
@@ -160,10 +160,10 @@ RakNet::RecvFromLoop
   -> DataModel change
 ```
 
-The buffered deserializer at `ram:0x10564dd3c` drains queued records,
+The buffered deserializer at `0x10564dd3c` drains queued records,
 updates receive timing and queue state, builds typed temporary records,
 and hands them to replication processing. It only ever sees typed records
-because `Replicator::OnReceive` (`ram:0x10561fb20`) dispatches the
+because `Replicator::OnReceive` (`0x10561fb20`) dispatches the
 message-ID byte first: `0x15`/`0x16` connection teardown, `0x1b` physics
 (dropped when the receiver is not ready, basis-index ordered otherwise),
 `0x81`/`0x83`/`0x86` replication queued via `0x1055fa738`. The exact wire
@@ -181,12 +181,12 @@ maintenance all become scheduled work:
 ```
 
 `0x104545ba0` grows and copies a circular 0x80-byte record buffer. Job
-start at `ram:0x102eec6da` marks a job active and calls its step function.
+start at `0x102eec6da` marks a job active and calls its step function.
 Job stop clears the active state, calls the stop hook, records elapsed
-time, and updates the arbiter. Node allocation at `ram:0x102ee3136` uses a
+time, and updates the arbiter. Node allocation at `0x102ee3136` uses a
 bounded pool. Running out of nodes is fatal. Workers pop from the same
 queue record enqueue writes to, promote the queued weak reference back to
-shared (`ram:0x102eeac76`), and dispatch through `ram:0x102ee3332` — a job
+shared (`0x102eeac76`), and dispatch through `0x102ee3332` — a job
 that dies while queued simply never runs.
 
 Shutdown drains waiting threads and yield waiters before destroying
