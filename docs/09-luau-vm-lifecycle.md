@@ -247,6 +247,12 @@ against Luau source semantics (tag constants match source exactly:
 | 22 | `0x1029b361a` | function-tag check plus inline-cache compare before dispatch — cached call dispatch | 21-ish |
 | 25 | `0x1029b5735` | `a - round(a/b)*b` on stack numbers — MOD | 37 |
 | 28 | `0x1029b786d` | `floor(a/b)` on stack-over-constant numbers, vector paths, tag-method `0xc` (IDIV) fallback — IDIVK | 82 |
+| 58 | `0x1029b39cd` | string-keyed global lookup with cache check and slow-path patch — GETGLOBAL | 7 |
+| 61 | `0x1029b56bf` | table + number + exactly-0.0 checks, iterator setup — FORGPREP_INEXT | 59 |
+| 63 | `0x1029b54e1` | jump iff truthy (nil/false fall through) — JUMPIF | 25 |
+| 65 | `0x1029b57a3` | register-register equality, tag-switched, no-jump-on-mismatch — JUMPIFEQ | 27 |
+| 66 | `0x1029b5a1b` | unconditional constant-to-register copy across two instruction words — LOADKX | 66 |
+| 69 | `0x1029b5688` | 4-instruction unconditional 16-bit jump, no interrupt check — JUMP | 23 |
 | 71 | `0x1029b563b` | conditional select-copy (truthy register wins, else constant) — no certain opcode; left unidentified | — |
 | 74 | `0x1029b6653` | method-name string check, inline-cache compare, slow lookup fallback — NAMECALL | 20 |
 | 78 | `0x1029b3a82` | dispatches through a third table at `0x1072d74e0` indexed by builtin ID — FASTCALL | 68 |
