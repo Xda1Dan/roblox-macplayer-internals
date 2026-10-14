@@ -285,7 +285,7 @@ against Luau source semantics (tag constants match source exactly:
 | 66 | `0x1029b5a1b` | unconditional constant-to-register copy across two instruction words — LOADKX | 66 |
 | 69 | `0x1029b5688` | 4-instruction unconditional 16-bit jump, no interrupt check — JUMP | 23 |
 | 71 | `0x1029b563b` | register truthy wins, else constant operand — ORK (pairs with slot 55 ANDK; slot 111 OR below confirms the plain shape) | 48 |
-| 74 | `0x1029b6653` | single-value cached const-key load with predicted-slot check and patch-C protocol, no invocation — GETTABLEKS | 15 |
+| 74 | `0x1029b6653` | value register stored into cached node slot with write barrier and patch-C — SETTABLEKS (operand roles match source: value from A, key from AUX) | 16 |
 | 78 | `0x1029b3a82` | two stack args copied, builtin-ID dispatch with 3-arg shape — FASTCALL3-leaning | 60 |
 | 79 | `0x1029b3b7c` | multi-value copy plus SIMD tag validation, top adjust — unidentified (return/vararg-list shaped) | — |
 | 80 | `0x1029b66fb` | nil-or-false test, skip-or-fall-through — JUMPIFNOT | 26 |
@@ -343,6 +343,12 @@ against Luau source semantics (tag constants match source exactly:
 | 222 | `0x1029b7b3c` | number and vector add fast paths, tag-method `0x8` (ADD) fallback — ADD | 33 |
 | 227 | `0x1029b5216` | single stack-arg builtin call — FASTCALL1-leaning | 73 |
 | 231 | `0x1029b6bdc` | table/const/reg write via helper — SETTABLEKS-leaning, medium-low | 16 |
+| 235 | `0x1029b6731` | register-minus-constant doubles — SUBK | 40 |
+| 236 | `0x1029b5d10` | AUX-key hashed store with predicted slot, patch-C, `__newindex` path — SETTABLEKS (second slot with this shape alongside slot 74; see notes) | 16 |
+| 238 | `0x1029b5f46` | nil-test with sign flag — JUMPXEQKNIL | 77 |
+| 240 | `0x1029b5e8c` | multi-value concat with barrier check — CONCAT | 49 |
+| 246 | `0x1029b5c54` | number-index bounds-checked store with barrier — SETTABLEN | 18 |
+| 247 | `0x1029b5e4e` | class construction via helper, object/table result — CONSTRUCT | 91 |
 
 Every identified slot differs from its stock position, so the shuffle is
 established by behavior, not just by table sparsity. Slot↔handler
@@ -358,6 +364,12 @@ Separately, two different builtin tables appear: `0x1072d74e0` (whose
 entries point at C-builtin implementations) and `0x1072d7ce0` (mixed
 contents, including non-code slots). Which table serves which call path
 is not settled — the opcode IDs above do not depend on it.
+
+A duplicate-slot question is open on stores: slots 74 and 236 are both
+store-shaped with patch-C (the former smaller with a method-vector
+cache, the latter with full `__newindex` machinery). Either the table
+duplicates SETTABLEKS or one slot is a variant the source doesn't
+separate. Both rows say so explicitly.
 
 ## Unknowns
 
