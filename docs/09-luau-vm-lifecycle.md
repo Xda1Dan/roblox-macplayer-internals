@@ -307,7 +307,7 @@ against Luau source semantics (tag constants match source exactly:
 | 118 | `0x1029b8b9f` | 2 bytes: trap only — permanently invalid slot, not an opcode | — |
 | 120 | `0x1029b411c` | table fast path plus full slow path with userdata/object handling (`luaV_gettable`) — GETTABLE | 13 |
 | 125 | `0x1029b45da` | builtin-ID dispatch with constant-table args and arg-count 2 — FASTCALL2K-leaning | 75 |
-| 127 | `0x1029b46b0` | per-tag method table (`global+0x960`, `0x48` stride) userdata call with marshaling — exact opcode unidentified, possibly engine-extended fast path | — |
+| 127 | `0x1029b46b0` | per-tag (`global+0x960`, `0x48` stride) userdata method call with argument marshaling — NAMECALLUDATA | 85 |
 | 140 | `0x1029b5599` | writes the signed 16-bit literal as a number — LOADN | 4 |
 | 141 | `0x1029b48d3` | const-key lookup with method/self setup and invocation machinery (full userdata and metatable paths) — NAMECALL | 20 |
 | 142 | `0x1029b64a0` | function/table/userdata dispatch with TM_ITER/TM_CALL metatable lookup, unconditional first jump — FORGPREP | 76 |
@@ -329,6 +329,7 @@ against Luau source semantics (tag constants match source exactly:
 | 179 | `0x1029b6d12` | string register vs constant-string compare with NOT flag — JUMPXEQKS | 80 |
 | 183 | `0x1029b6150` | array- and hash-part traversal with index/value writeback, loop-back vs fallthrough exits — FORGLOOP | 58 |
 | 185 | `0x1029b605b` | unconditional wide jump from the instruction word, no state change — JUMPX | 67 |
+| 186 | `0x1029b4a5f` | string hash probe with predicted slot, full `__index`/metatable/userdata/object fallbacks funneled into `gettable` — GETTABLEKS | 15 |
 | 190 | `0x1029b88f9` | vararg-region copy with MULTRET branch — GETVARARGS family, exact member under review (possible second slot; see notes) | — |
 | 198 | `0x1029b60fa` | reversed-strict less-than across number, string, and metamethod paths — JUMPIFNOTLE | 31 |
 | 201 | `0x1029b6cca` | truthiness test, truthy selects second register — AND | 45 |
@@ -349,6 +350,9 @@ against Luau source semantics (tag constants match source exactly:
 | 240 | `0x1029b5e8c` | multi-value concat with barrier check — CONCAT | 49 |
 | 246 | `0x1029b5c54` | number-index bounds-checked store with barrier — SETTABLEN | 18 |
 | 247 | `0x1029b5e4e` | class construction via helper, object/table result — CONSTRUCT | 91 |
+| 251 | `0x1029b7a9e` | all-stack operands, number and vector subtract — SUB | 34 |
+| 253 | `0x1029b7820` | floor-division with vector path and distinct slow helper — IDIV | 81 |
+| 255 | `0x1029b5af8` | closure allocate plus value/upvalue/by-ref capture loop — NEWCLOSURE | 19 |
 
 Every identified slot differs from its stock position, so the shuffle is
 established by behavior, not just by table sparsity. Slot↔handler
