@@ -162,8 +162,12 @@ RakNet::RecvFromLoop
 
 The buffered deserializer at `ram:0x10564dd3c` drains queued records,
 updates receive timing and queue state, builds typed temporary records,
-and hands them to replication processing. The exact wire schema is not
-claimed here.
+and hands them to replication processing. It only ever sees typed records
+because `Replicator::OnReceive` (`ram:0x10561fb20`) dispatches the
+message-ID byte first: `0x15`/`0x16` connection teardown, `0x1b` physics
+(dropped when the receiver is not ready, basis-index ordered otherwise),
+`0x81`/`0x83`/`0x86` replication queued via `0x1055fa738`. The exact wire
+schema is not claimed here.
 
 ### The scheduler carries everything
 

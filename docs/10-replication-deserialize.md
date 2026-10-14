@@ -8,6 +8,11 @@
 RakNet::RecvFromLoop  ram:0x102d606da
   |  socket -> RakNet -> packet-return queue (split/ack/NAK handled inside RakNet)
   v
+Replicator::OnReceive  ram:0x10561fb20
+  |  read message-ID byte -> dispatch table below
+  |  0x15/0x16 connection, 0x1b physics, 0x81/0x83/0x86 replication
+  |  typed items via 0x1055fa738 (returns 2 = queued, 1 = inline, 0 = special)
+  v
 buffered deserializer  ram:0x10564dd3c  (0xde0 bytes, ~0xb98 frame)
   |  lock queue -> pop record -> timing/counters -> temp record
   |  -> replication queue -> budget check -> repeat or stop
@@ -131,6 +136,41 @@ void deserializeDrain(Job* j) {
   `CurrentNumPacketsWaitingForDeserialize`).
 - Ownership is explicit: temp records are stack-scoped, shared state uses
   atomic ref bumps, queue cursors are snapshots.
+
+## 2. OnReceive dispatch — `ram:0x10561fb20`
+
+**What it does:** reads the first payload byte and routes the packet.
+Return code is the contract: `0` = special-cased, `1` = handled inline,
+`2` = queued as a typed item for the deserializer.
+
+**Step by step**
+
+1. Read one byte from the bitstream (the message ID) plus a telemetry
+   classifier: `0x83→0x1f`, `0x86→2`, `0x8d→0xf`, `0xa1→1`, `0xa5→0x1e`,
+   `0xa6→3`. Unknown IDs fall through to the default path.
+2. Connection bytes `0x15` / `0x16`: log `Lost connection` /
+   `ID_DISCONNECTION_NOTIFICATION`, tear down the replicator session,
+   report the disconnect reason.
+3. Physics byte `0x1b`: read the replication fields, ask the physics
+   receiver (`+0x408` virtual) whether it is ready — unready means the
+   packet is dropped with `call to onreceive before physicsReceiver is
+   initialized`. Otherwise enforce the basis-index high-water mark
+   (out-of-order bases are reconciled, not applied blindly), apply, then
+   copy the record (`0x10563c474`) and hand it to the item queue
+   (`0x1055fa738`). Returns `2`.
+4. Replication bytes `0x81`, `0x83`, `0x86`: copy the bitstream words,
+   copy the record, hand to the item queue. Returns `2`. Bytes `0x82`,
+   `0x89`, `0x91` are ignored. Byte `0x84` takes a special path
+   (allocate `0x48`, `0x1055cf5b0`, publish at `+0x71b`). Bytes `0x87`,
+   `0x88`, `0x8b`, `0x8c` are flag-gated.
+5. Everything else lands in the default path (`LAB_105620d49`): generic
+   replication-data handling, returns `1`.
+
+The handoff `0x1055fa738(replicator, &item)` is the single funnel that
+creates the typed `Deserialized*Item` queue entries (new object, property
+change, delete, event invocation, join data). Every `returns 2` path ends
+there; that is why the deserializer at `ram:0x10564dd3c` only ever sees
+typed records, never raw sockets.
 
 ## Unknowns
 
