@@ -236,11 +236,17 @@ against Luau source semantics (tag constants match source exactly:
 | Table slot | Handler | Behavior | Stock slot |
 |---|---|---|---|
 | 1 | `0x1029b3d0d` | copies argument TValues, grows the stack (`luaD_growstack`-shaped call), sets the new frame top — call setup | 21 |
-| 3 | `0x1029b4ed7` | number+number fast path, slow-path fallback — ADD | 33 |
+| 3 | `0x1029b4ed7` | number plus constant-table number, slow-path fallback — ADDK (second operand addressed off the constant base, not the stack) | 39 |
 | 9 | `0x1029b52ab` | patches the loop-counter field of its own instruction — FOR-loop prep | 56 |
-| 12 | `0x1029b5485` | `x*x`, `sqrt(x)`, `x*x*x` fast paths, `_pow()` fallback — POW | 38 |
+| 12 | `0x1029b5485` | constant-exponent `x*x`, `sqrt(x)`, `x*x*x` fast paths, `_pow()` fallback — POWK | 44 |
+| 14 | `0x1029b7909` | number divided by constant-table number, vector path, userdata-metatable fallback with tag-method `0xb` (DIV) — DIVK | 42 |
+| 16 | `0x1029b58bf` | plain `_pow()` on two stack numbers — POW | 38 |
+| 17 | `0x1029b5934` | number/number or string/string less-than, skip-on-false — JUMPIFLT | 29 |
+| 18 | `0x1029b5863` | number register vs constant-table number compare, conditional skip with flag bit — JUMPXEQKN family | 79 |
 | 20 | `0x1029b79a5` | number×number, vector paths, userdata-metatable fallback, slow path — MUL | 35 |
 | 22 | `0x1029b361a` | function-tag check plus inline-cache compare before dispatch — cached call dispatch | 21-ish |
+| 25 | `0x1029b5735` | `a - round(a/b)*b` on stack numbers — MOD | 37 |
+| 28 | `0x1029b786d` | `floor(a/b)` on stack-over-constant numbers, vector paths, tag-method `0xc` (IDIV) fallback — IDIVK | 82 |
 
 Every identified slot differs from its stock position (exact stock:
 CALL 21, ADD 33, MUL 35, POW 38, FORNPREP 56), so the shuffle is
