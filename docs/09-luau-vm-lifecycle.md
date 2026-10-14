@@ -227,6 +227,27 @@ call   0x1029940f4          ; luaG_runerror-shaped
 Selective hardening, not a universal compiler rule: direct RIP-relative
 string references still exist elsewhere.
 
+### Shuffle proven: six handlers identified by behavior
+
+Table slots were identified by what their handler bodies do, checked
+against Luau source semantics (tag constants match source exactly:
+`3` = number, `5` = vector, `8` = function, `9` = userdata):
+
+| Table slot | Handler | Behavior | Stock slot |
+|---|---|---|---|
+| 1 | `0x1029b3d0d` | copies argument TValues, grows the stack (`luaD_growstack`-shaped call), sets the new frame top — call setup | 21 |
+| 3 | `0x1029b4ed7` | number+number fast path, slow-path fallback — ADD | 33 |
+| 9 | `0x1029b52ab` | patches the loop-counter field of its own instruction — FOR-loop prep | 56 |
+| 12 | `0x1029b5485` | `x*x`, `sqrt(x)`, `x*x*x` fast paths, `_pow()` fallback — POW | 38 |
+| 20 | `0x1029b79a5` | number×number, vector paths, userdata-metatable fallback, slow path — MUL | 35 |
+| 22 | `0x1029b361a` | function-tag check plus inline-cache compare before dispatch — cached call dispatch | 21-ish |
+
+Every identified slot differs from its stock position (exact stock:
+CALL 21, ADD 33, MUL 35, POW 38, FORNPREP 56), so the shuffle is
+established by behavior, not just by table sparsity. All handlers end by
+jumping back to the central dispatch (`0x1029b3618` / `0x1029b360d`
+region), confirming the single-loop structure.
+
 ## Unknowns
 
 - Exact helper names behind VM start / resume calls.
