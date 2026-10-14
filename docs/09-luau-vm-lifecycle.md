@@ -284,12 +284,18 @@ against Luau source semantics (tag constants match source exactly:
 | 65 | `0x1029b57a3` | register-register equality, tag-switched, no-jump-on-mismatch — JUMPIFEQ | 27 |
 | 66 | `0x1029b5a1b` | unconditional constant-to-register copy across two instruction words — LOADKX | 66 |
 | 69 | `0x1029b5688` | 4-instruction unconditional 16-bit jump, no interrupt check — JUMP | 23 |
-| 71 | `0x1029b563b` | conditional select-copy (truthy register wins, else constant) — no certain opcode; left unidentified | — |
+| 71 | `0x1029b563b` | register truthy wins, else constant operand — ORK (pairs with slot 55 ANDK; slot 111 OR below confirms the plain shape) | 48 |
 | 74 | `0x1029b6653` | method-name string check, inline-cache compare, slow lookup fallback — NAMECALL | 20 |
 | 78 | `0x1029b3a82` | dispatches through a third table at `0x1072d74e0` indexed by builtin ID — FASTCALL | 68 |
 | 79 | `0x1029b3b7c` | multi-value copy plus SIMD tag validation, top adjust — unidentified (return/vararg-list shaped) | — |
 | 80 | `0x1029b66fb` | nil-or-false test, skip-or-fall-through — JUMPIFNOT | 26 |
 | 83 | `0x1029b6314` | number negate (sign-flip via per-build masks), tag-method `0xf` (UNM) fallback — MINUS | 51 |
+| 107 | `0x1029b5583` | writes nil tag to the destination slot, single-word — LOADNIL | 2 |
+| 109 | `0x1029b6275` | upvalue-table source with closed-over dereference, 16-byte copy — GETUPVAL | 9 |
+| 111 | `0x1029b67ec` | falsy first operand wins, else second (inverse of ANDK) — OR | 46 |
+| 112 | `0x1029b692e` | triple number-tag check, step/limit/index setup, conditional first jump — FORNPREP | 56 |
+| 114 | `0x1029b644a` | number and string less-or-equal fast paths, generic fallback, skip-on-true — JUMPIFLE | 28 |
+| 115 | `0x1029b8231` | cached-closure reuse with capture loop (value/upvalue only, no by-ref) — DUPCLOSURE | 64 |
 | 116 | `0x1029b4014` | builtin-ID dispatch via `0x1072d74e0` with frame args — FASTCALL family | 68-ish |
 | 117 | `0x1029b69b7` | interrupt hook + GC step, then numeric step/limit/exit — FORNLOOP | 57 |
 | 118 | `0x1029b8b9f` | 2 bytes: trap only — permanently invalid slot, not an opcode | — |
