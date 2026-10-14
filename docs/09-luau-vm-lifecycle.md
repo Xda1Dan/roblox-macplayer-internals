@@ -305,7 +305,7 @@ against Luau source semantics (tag constants match source exactly:
 | 116 | `0x1029b4014` | builtin-ID dispatch via `0x1072d74e0` with frame args — FASTCALL family | 68-ish |
 | 117 | `0x1029b69b7` | interrupt hook + GC step, then numeric step/limit/exit — FORNLOOP | 57 |
 | 118 | `0x1029b8b9f` | 2 bytes: trap only — permanently invalid slot, not an opcode | — |
-| 120 | `0x1029b411c` | table fast path plus full slow path with userdata/object handling (`luaV_gettable`) — GETTABLE | 13 |
+| 120 | `0x1029b411c` | method resolution with DIRECT per-type invocation and result — matches no stock opcode cleanly (stock NAMECALL never invokes inside its handler); leading hypothesis is an engine-custom method-call opcode | — |
 | 125 | `0x1029b45da` | builtin-ID dispatch with constant-table args and arg-count 2 — FASTCALL2K-leaning | 75 |
 | 127 | `0x1029b46b0` | per-tag (`global+0x960`, `0x48` stride) userdata method call with argument marshaling — NAMECALLUDATA | 85 |
 | 140 | `0x1029b5599` | writes the signed 16-bit literal as a number — LOADN | 4 |
@@ -320,7 +320,7 @@ against Luau source semantics (tag constants match source exactly:
 | 152 | `0x1029b6b82` | jump unless less-than (NaN jumps; strings by inverted compare) — JUMPIFNOTLT | 32 |
 | 157 | `0x1029b6ae9` | class tag `0xc`, open/closed flag, superclass inherit — NEWCLASS | 90 |
 | 158 | `0x1029b682c` | constant divisor, `a-floor(a/b)*b` — MODK | 43 |
-| 159 | `0x1029b6c2a` | table indexed by number register with equality fast path, `gettable` slow path — GETTABLE family, exact member medium-low | — |
+| 159 | `0x1029b6c2a` | register-held integer index with exactness guards, array fast path, `gettable` slow path — GETTABLE (matches the stock numeric-key path) | 13 |
 | 160 | `0x1029b5a48` | unconditional 16-byte register copy — MOVE | 6 |
 | 163 | `0x1029b635b` | writes boolean value and tag with skip — LOADB | 3 |
 | 164 | `0x1029b5de3` | immediate-index array fast path (`index < size`, no metatable), `index+1` slow path via `gettable` — GETTABLEN, matches source line-for-line | 17 |
