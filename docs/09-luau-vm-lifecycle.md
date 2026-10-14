@@ -348,7 +348,7 @@ against Luau source semantics (tag constants match source exactly:
 | 236 | `0x1029b5d10` | AUX-key hashed store with predicted slot, patch-C, `__newindex` path — SETTABLEKS (second slot with this shape alongside slot 74; see notes) | 16 |
 | 238 | `0x1029b5f46` | nil-test with sign flag — JUMPXEQKNIL | 77 |
 | 240 | `0x1029b5e8c` | multi-value concat with barrier check — CONCAT | 49 |
-| 246 | `0x1029b5c54` | number-index bounds-checked store with barrier — SETTABLEN | 18 |
+| 246 | `0x1029b5c54` | register-held integer index with exactness guards, array store with barrier, `settable` slow path — SETTABLE (matches the stock array-assign fast path including the readonly check) | 14 |
 | 247 | `0x1029b5e4e` | class construction via helper, object/table result — CONSTRUCT | 91 |
 | 251 | `0x1029b7a9e` | all-stack operands, number and vector subtract — SUB | 34 |
 | 253 | `0x1029b7820` | floor-division with vector path and distinct slow helper — IDIV | 81 |
