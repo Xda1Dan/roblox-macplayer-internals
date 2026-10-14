@@ -286,7 +286,7 @@ against Luau source semantics (tag constants match source exactly:
 | 69 | `0x1029b5688` | 4-instruction unconditional 16-bit jump, no interrupt check — JUMP | 23 |
 | 71 | `0x1029b563b` | register truthy wins, else constant operand — ORK (pairs with slot 55 ANDK; slot 111 OR below confirms the plain shape) | 48 |
 | 74 | `0x1029b6653` | method-name string check, inline-cache compare, slow lookup fallback — NAMECALL | 20 |
-| 78 | `0x1029b3a82` | dispatches through a third table at `0x1072d74e0` indexed by builtin ID — FASTCALL | 68 |
+| 78 | `0x1029b3a82` | two stack args copied, builtin-ID dispatch with 3-arg shape — FASTCALL3-leaning | 60 |
 | 79 | `0x1029b3b7c` | multi-value copy plus SIMD tag validation, top adjust — unidentified (return/vararg-list shaped) | — |
 | 80 | `0x1029b66fb` | nil-or-false test, skip-or-fall-through — JUMPIFNOT | 26 |
 | 83 | `0x1029b6314` | number negate (sign-flip via per-build masks), tag-method `0xf` (UNM) fallback — MINUS | 51 |
@@ -314,6 +314,12 @@ against Luau source semantics (tag constants match source exactly:
 | 144 | `0x1029b5d80` | register-to-upvalue copy with write barrier — SETUPVAL | 10 |
 | 145 | `0x1029b5d3c` | constant-minus-register doubles — SUBRK | 71 |
 | 147 | `0x1029b64a0` | MULTRET bulk copy or bounded copy with nil fill — GETVARARGS | 63 |
+| 149 | `0x1029b4942` | reads the paired CALL word, builtin call, skips past CALL on success — FASTCALL (matches source including the CALL pairing, which is its unique signature) | 68 |
+| 150 | `0x1029b6784` | pure 16-bit jump plus safepoint call — JUMPBACK | 24 |
+| 151 | `0x1029b6a71` | two stack-sourced args, CALL-word pairing — FASTCALL2 | 74 |
+| 152 | `0x1029b6b82` | jump unless less-than (NaN jumps; strings by inverted compare) — JUMPIFNOTLT | 32 |
+| 157 | `0x1029b6ae9` | class tag `0xc`, open/closed flag, superclass inherit — NEWCLASS | 90 |
+| 158 | `0x1029b682c` | constant divisor, `a-floor(a/b)*b` — MODK | 43 |
 | 159 | `0x1029b6c2a` | table indexed by number register with equality fast path, `gettable` slow path — GETTABLE family, exact member medium-low | — |
 | 160 | `0x1029b5a48` | unconditional 16-byte register copy — MOVE | 6 |
 | 163 | `0x1029b635b` | writes boolean value and tag with skip — LOADB | 3 |
@@ -321,11 +327,18 @@ against Luau source semantics (tag constants match source exactly:
 | 168 | `0x1029b68a9` | table clone helper plus GC step — DUPTABLE | 54 |
 | 176 | `0x1029b8a33` | interrupt hook call with VM state reload and re-dispatch — interrupt trampoline, JUMPBACK/COVERAGE family, medium-low | — |
 
-Every identified slot differs from its stock position (exact stock:
-CALL 21, ADD 33, MUL 35, POW 38, FORNPREP 56), so the shuffle is
+Every identified slot differs from its stock position, so the shuffle is
 established by behavior, not just by table sparsity. All handlers end by
 jumping back to the central dispatch (`0x1029b3618` / `0x1029b360d`
 region), confirming the single-loop structure.
+
+Two open questions live in the FASTCALL corner. Slot 78 was first labeled
+plain FASTCALL and is now FASTCALL3-leaning (3-arg shape); slot 149 owns
+the plain-FASTCALL evidence (paired CALL word, the unique signature).
+Separately, two different builtin tables appear: `0x1072d74e0` (whose
+entries point at C-builtin implementations) and `0x1072d7ce0` (mixed
+contents, including non-code slots). Which table serves which call path
+is not settled — the opcode IDs above do not depend on it.
 
 ## Unknowns
 
