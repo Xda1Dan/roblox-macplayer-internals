@@ -122,6 +122,18 @@ player bookkeeping resolves membership under `game.Players`, then lifecycle
 events are delivered to service consumers; removal performs the inverse before
 dependent references are released.
 
+The script path is now summarized as:
+
+```text
+admission → source/bytecode lookup → compile/cache → auth/load
+→ ScriptContext execution record → VM thread → Luau execute
+→ completion/error/yield → TaskScheduler → ScriptContextResume
+```
+
+`task.wait` and async engine calls yield resumable VM state; they do not sleep
+the worker thread. Native `loadstring` is also policy-gated and can be
+unavailable in RobloxScript contexts.
+
 The public `lua_pcall` name is absent from the binary, but protected execution
 is not absent: `luaB_pcall` (`0x10298b913`), `luaB_pcallrun`
 (`0x10298b946`), `luaD_rawrunprotected` (`0x102995084`), `luaD_throw`, and

@@ -69,7 +69,30 @@ permission mask used to admit a script.
    script (`BindToMessage{,Parallel}` enforce descendant-of-Actor).
 10. **Collect** — `GcJob`, `ClearUnusedLuaRefsJob`,
     `LuauHeapMemoryReport::{aggregate,collectInstances,linkHeap,runGc}`,
-    `ScriptScopeTokenPool` occupancy stats.
+     `ScriptScopeTokenPool` occupancy stats.
+
+### Complete execution chain
+
+Putting the native paths together:
+
+```text
+Instance admission
+  → RunContext/capability/identity/container checks
+  → source ProtectedString or asset/bytecode lookup
+  → compilation-cache lookup or Luau compile
+  → bytecode authentication/load boundary
+  → ScriptContext execution record
+  → VM collection thread selection
+  → native resume/start helper
+  → Luau interpreter or native execution
+  → completion, error, or yield
+  → waiting queue + TaskScheduler
+  → later ScriptContextResume
+```
+
+This is why `task.wait`, DataStore yields, async callbacks, and network-driven
+callbacks do not block an operating-system worker: they return from the VM
+with resumable state and are re-entered by the scheduler.
 
 Teardown reverses it: `LoaderFacet::disassociateState` → scheduler drain
 (`waitingThreads`, `YieldEvent->waiterCount`) → `VmCollectionFacet` free
@@ -142,6 +165,13 @@ VM start path, rather than only failing inside Luau.
 retains shared references, derives execution flags from the script and current
 context, and stores inherited limits/identity data. The exact field meanings
 are not stable enough to publish as fixed offsets.
+
+The native `loadstring` bridge at `ram:0x1014c86c8` is policy-gated. It records
+the call as `loadstring`, checks the ScriptContext/security environment, and
+can reject the operation with `loadstring() is not available` or
+`loadstring() is not available in RobloxScript context`. When admitted, it
+passes source through the engine's compile/load helpers rather than directly
+creating an arbitrary untracked VM.
 
 ### Native `require` behavior
 
