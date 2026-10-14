@@ -1,32 +1,83 @@
-# 00 — Binary overview (loader facts)
+# Binary overview
 
-Target: `MacPlayer-version-f9247f9560044102/RobloxPlayer.app/Contents/MacOS/RobloxPlayer`
+In one paragraph: this is a 120 MB x86_64 macOS player executable. The
+notes below record its layout, entry point, linked frameworks, app classes,
+and address convention used everywhere else in this repository.
 
-| Fact | Value | Source |
-|------|-------|--------|
-| Format | Mach-O 64-bit LE (`0xfeedfacf`), `MH_EXECUTE`, x86_64 (`cputype 0x01000007`), PIE | header parse |
-| Entry | `entryoff 0x41fe2` → `ram:0x100041fe2` | `LC_MAIN` |
-| `__TEXT` | `vm 0x100000000 + 0x6e64000` (≈110 MB), 13 sections; `__text` itself `0x5bb9676` (≈96 MB code) | segment + section headers |
-| `__DATA` | `vm 0x106e64000`, `__const/__cfstring/__objc_*` + 25 sections | same |
-| Architecture | `x86:LE:64`, compiler `gcc`, imagebase `0x100000000` | program metadata |
-| Symbol count (unanalyzed import) | 3923 total | symbol table |
-| Symtab | 2275 entries: 668 defined (guard vars, typeinfo, vtables-adjacent), 1606 undefined imports | `LC_SYMTAB`/`DYSYMTAB` parse |
-| minOS | 10.13 | `LC_VERSION_MIN_MACOSX` |
-| UUID | `0a9f023feb4335ffb4bf764a4bac026e` | `LC_UUID` |
-| Entitlements (observed keys) | `disable-executable-page-protection` (JIT), audio-input, camera | `CodeResources` strings |
+## Basic facts
 
-Linked frameworks (34 `LC_LOAD_DYLIB` + 4 weak): Cocoa/AppKit/Foundation,
-Metal, OpenGL, QuartzCore, AVFoundation/VideoToolbox/CoreMedia, AudioToolbox,
-WebKit, Security, `libc++.1`, `libSystem.B`, `@rpath/libmimalloc.3.dylib`
-(RPATHs: `@loader_path/./__RobloxPlayer__shared_libs_symlink_tree`,
-`@executable_path`). Full list in the evidence ledger.
+| Fact | Value |
+|---|---|
+| File | `MacPlayer-version-f9247f9560044102/RobloxPlayer.app/Contents/MacOS/RobloxPlayer` |
+| Format | Mach-O 64-bit little-endian, `MH_EXECUTE`, x86_64, PIE |
+| Entry | file offset `0x41fe2` → `ram:0x100041fe2` |
+| Code | `__TEXT` ≈ 110 MB across 13 sections; `__text` itself ≈ 96 MB |
+| Data | `__DATA` with `__const`, `__cfstring`, `__objc_*`, plus 25 sections |
+| Image base | `0x100000000` |
+| Minimum OS | 10.13 |
+| UUID | `0a9f023feb4335ffb4bf764a4bac026e` |
+| Symbols | 2275 symtab entries: 668 defined, 1606 undefined imports |
+| SHA-256 | `ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47` |
 
-ObjC surface: 63 classes in `__objc_classlist`, read from the class-list
-metadata (pure data): `RobloxPlayerAppDelegate` (94 methods),
-`EmbeddedWebView` (90), `RobloxOgreView` (41), `InputCapture` (39),
-`RBMessageBus` + protocol family, WebRTC `RTC*`, `GamepadSupport`,
-`SDL3_Rumble*`. Full table: [05-objc-bridge.md](05-objc-bridge.md).
+Addresses in this repository are `ram:` addresses. For this build:
 
-Notable: RBX C++ symbols are visibility-hidden — the shipped symtab contains
-only std/boost typeinfo plus guards. All engine function addresses below were
-reached via ObjC IMPs and callee tracing, not symbol lookup.
+```text
+virtual address = file offset + 0x100000000
+```
+
+Example: the string reference at file offset `0x68d7655` is address
+`ram:0x1068d7655`.
+
+## Frameworks
+
+34 linked libraries plus 4 weak links, including Cocoa / AppKit /
+Foundation, Metal, OpenGL, QuartzCore, AVFoundation / VideoToolbox /
+CoreMedia, AudioToolbox, WebKit, Security, `libc++.1`, `libSystem.B`,
+and `@rpath/libmimalloc.3.dylib`.
+
+RPATHs point at the app’s shared-libs trees under `@loader_path` and
+`@executable_path`.
+
+Entitlement-related keys seen in the binary include executable-page
+protection settings for JIT, audio input, and camera.
+
+## App surface
+
+63 Objective-C classes live in `__objc_classlist`. The largest ones:
+
+- `RobloxPlayerAppDelegate` (94 methods): launch, deeplinks, join,
+  teleport, leave-game, Lua start callbacks, telemetry, Crashpad upload.
+- `EmbeddedWebView` (90): focus callbacks, script messages, auth cookies,
+  purchases, navigation policy, layout.
+- `RobloxOgreView` (41): main render and input view.
+- `InputCapture` (39): mouse, scroll, touch, fullscreen, cursor.
+- `RBMessageBus` family: typed messages to system services such as
+  permissions, contacts, SMS, linking, experiments, and safe-area insets.
+- WebRTC `RTC*`, `GamepadSupport`, `SDL3_Rumble*`, display, thermal, and
+  battery helpers.
+
+Full table: [05-objc-bridge.md](05-objc-bridge.md).
+
+Key app callbacks in this build:
+
+| Callback | Address |
+|---|---|
+| `appLuaWillStartWithDataModel:` | `ram:0x10003913e` |
+| `ugcGameLuaWillStartWithDataModel:` | `ram:0x100038e3c` |
+| shared Lua-start core | `ram:0x100038f12` |
+| `handleDeeplinkUrlV2` | `ram:0x1000376fd` |
+| `notifyLuaFocusedIfNeeded` | `ram:0x10000cdd2` |
+| `didReceiveScriptMessage` | `ram:0x10000e295` |
+
+## A note on names
+
+Engine C++ names are hidden in the shipped symbol table. What remains are
+mostly standard-library and support type names plus guards. Engine function
+addresses in these notes are therefore identified by behavior, log lines,
+string references, and call relationships — not by exported symbols.
+
+## Limits
+
+- Struct offsets such as `+0x778` belong to this build only.
+- Flag-gated classes and services change across versions.
+- No whole-program call graph is claimed here.

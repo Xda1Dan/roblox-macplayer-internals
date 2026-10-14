@@ -2,7 +2,7 @@
 
 > What this is: how a `lua_State` comes into existence, what Roblox puts
 > around stock Luau, how code runs protected, and where strings get
-> deliberately hard to xref.
+> deliberately hard to trace by string reference.
 
 ```
 allocator callback + context
@@ -20,9 +20,9 @@ protected execution
   |  ram:0x102995084  luaD_rawrunprotected boundary
   |  ram:0x102995125  luaD_throw (C++ exception in this build)
   |  ram:0x1029940f4  luaG_runerror
-  |  ram:0x1029adfd3  luau_execute (entry confirmed, body not decompiled)
+  |  ram:0x1029adfd3  luau_execute (entry confirmed, highly optimized body not detailed here)
   v
-selective pointer hardening (string xref obfuscation)
+selective pointer hardening (string-reference hardening)
 ```
 
 ---
@@ -41,7 +41,7 @@ fields, then runs protected init. Null means the caller reports
 | entry | ram:0x10299fd5b |
 | size | 0x4a8 bytes |
 | args | (allocatorFn, allocatorCtx) - RDI = fn, RSI = ctx |
-| confidence | high |
+| covered here | entry, inputs, and exits |
 
 **Step by step**
 
@@ -102,7 +102,7 @@ Roblox bindings and globals, establish `_G`, attach sandbox and config
 handlers, retain in the VM collection. Failure at any point unwinds;
 there is never a half-owned state.
 
-The offset header's `luaopen_base / math / os` entries point into this
+The `luaopen_base`, `luaopen_math`, and `luaopen_os` names point into this
 registration sequence - but "opens base" does not mean stock unrestricted
 base. Policy, identity, and capabilities are applied around the VM before
 any script runs, and scripts get threads from the collection, not fresh
@@ -122,18 +122,18 @@ the shipped symbol and string inventory. The machinery is present:
 | 0x102995084 | luaD_rawrunprotected boundary |
 | 0x102995125 | luaD_throw via C++ exception |
 | 0x1029940f4 | luaG_runerror build and propagate |
-| 0x1029adfd3 | luau_execute entry confirmed; body not decompiled |
+| 0x1029adfd3 | luau_execute entry confirmed; highly optimized body not detailed here |
 
 So: name stripped, implementation present. Engine paths also use their own
 ScriptContext protected helpers rather than needing a public `lua_pcall`.
 
 ---
 
-## 4. Split pointers (why some xrefs miss)
+## 4. Split pointers (why some string references miss)
 
 **What it does:** selected sites replace `lea reg,[rip+string]` with
 `lea dummy + mov imm(delta) + add`, where `dummy` is an unrelated address
-already in `__TEXT` and `real = dummy + delta`. Naive xref scanners that
+already in `__TEXT` and `real = dummy + delta`. Simple string-reference scans that
 only match RIP-relative references to `__cstring` miss these.
 
 **Verified example - ram:0x102988254 (Luau error path)**

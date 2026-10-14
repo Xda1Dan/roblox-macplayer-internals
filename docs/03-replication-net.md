@@ -1,98 +1,119 @@
-# 03 — Networking + replication
+# Networking reference
 
-Architecture from log channels, the string table, and analyzed dispatch
-helpers. Code addresses for the inner replicator are still unmapped
-(RBX symbols are visibility-hidden); the shape below is observed in
-channels and strings unless noted.
+In one paragraph: RakNet moves bytes. A receive loop owns the socket. A
+buffered deserializer drains queued packets on a time budget. A
+replicator turns payloads into typed items. The DataModel applies them
+only when ownership and location rules pass. Voice uses a separate media
+stack.
 
 ## Layers, outside in
 
-1. **Join**: protocol URL → `handleDeeplinkUrlV2` (`ram:0x1000376fd`) →
-   `RBLinkingProtocol detectURL` + session via `0x1051e5369` →
-   `GameJoinUtil` (50 refs), `JoinDataRxStats`, `AvatarJoinMetrics`.
-2. **Transport**: `NetworkClient` over `RbxTransport`
-   (`RnaExpConnection/Listener/Slot`, `TLS`, `QUIC`, `Ngtcp2`, `ChannelTracker`,
-   `IoLibContext`, `DummyClient`), RakNet underneath
-   (`RakNetConnectTrace/PktTrace`, `RaknetJoinOrDisconnectRequest`,
-   `AddProfilerTelemetryScopeForRakNet`, ping breakdown
-   `RDeserializeToPBQ`-style stages).
-3. **Reception**: RakNet's receive loop (`RakNet::RecvFromLoop`,
-   `ram:0x102d60715`) feeds a packet-return queue. The client-side
-   `DeserializePacketsJob`/buffered-deserialize path is represented by
-   `ram:0x10564eab9`: it checks the queue, removes records from a circular
-   queue, updates receive-time counters, creates typed temporary records, and
-   hands them to replication-side processing queues. It can stop or defer work
-   when the per-step budget/queue state says so. The binary exposes the
-   associated measurements `AvgTimeSpentInDeserializeQueue`,
-   `CurrentNumPacketsWaitingForDeserialize`, and
-   `deserializePacketsJob_total`.
-4. **Apply**: `Network::ClusterSerializer::decodePBCChunk` (voxel
-   `Grid_NEW` regions) + three replicators — `Large`, `Slim`, `Mega`
-   (`LargeReplicatorTrace`, `MegaReplicatorLog/ConnData`,
-   `ReplicatorPropertyCoalescing`, `SlimInstanceHashes`).
-5. **Rules**: ownership/prediction gated on DataModel/Workspace membership
-   (`Can only call Network Ownership API on a part that is descendent of
-   Workspace`, `Cannot predict instance {}: Only instances under Workspace`,
-   `NetworkOwnershipErrors`, `StreamingPinLog`, `IsSingleDataModelLifeCycleListener`).
+1. **Join** — protocol URL, `handleDeeplinkUrlV2` (`ram:0x1000376fd`),
+   session via `0x1051e5369`, plus join stats and avatar metrics.
+2. **Transport** — `NetworkClient` over `RbxTransport` (connections,
+   listeners, slots, TLS, QUIC, channel tracking), RakNet underneath
+   (connect and packet traces, join-or-disconnect requests, ping stages).
+3. **Receive** — `RakNet::RecvFromLoop` (`ram:0x102d606da`) feeds a
+   packet-return queue. The buffered deserializer (`ram:0x10564dd3c`)
+   drains it, updates receive timing and queue counters, builds typed
+   temporary records, and hands them to replication processing. Work can
+   stop or defer on budget. Related counters: `AvgTimeSpentInDeserializeQueue`,
+   `CurrentNumPacketsWaitingForDeserialize`, `deserializePacketsJob_total`.
+4. **Apply** — voxel chunk decoding plus `Large`, `Slim`, and `Mega`
+   replicators with property coalescing and instance hashing.
+5. **Rules** — ownership and prediction need DataModel and Workspace
+   membership. Examples: network-ownership calls require a `Workspace`
+   descendant; prediction requires an instance under `Workspace`.
 
-## Player join/removal boundary
-
-Player membership is represented as a replicated service operation, not only
-as a local `Instance` insertion. The binary has separate network-side
-`onPlayerAdded` and `onPlayerRemoving` paths with failure reporting, while the
-Players service registers public lifecycle events. The supported lifecycle is:
+Step by step for one batch:
 
 ```text
-join/player replication item
-  → create or resolve Player under Players
-  → update player/session bookkeeping
-  → fire PlayerAdded / connecting notifications
-  → downstream services observe the new Player
-
-leave/removal item
-  → remove network/player bookkeeping
-  → fire PlayerRemoving / disconnecting notifications
-  → release dependent service references
+socket bytes
+  -> RakNet framing, acks, split reassembly
+  -> packet-return queue
+  -> DeserializePacketsJob slice
+  -> typed item (new object, property change, delete, event call, join data)
+  -> ownership and location check
+  -> DataModel mutation or drop with a diagnostic
 ```
 
-The exact join opcode and wire fields remain unresolved. What is supported is
-the boundary: APIs enforce that a Player used by client calls is a child of
-`game.Players`, and service consumers receive lifecycle events after membership
-changes.
+## Player join and removal
 
-## Voice is separate
+Membership is a replicated operation, not only a local insert.
 
-`RealtimeMedia`, `StratusSession`, `WebrtcInput`, `LibWebrtcImpl`,
-`CrossExperienceVoiceController`, `VoiceChat{Logs,ControlPlane}` (551 refs —
-largest channel family), `RccRealtimeRelay`.
+```text
+join item
+  -> create or resolve Player under Players
+  -> update player and session bookkeeping
+  -> fire PlayerAdded and connecting notifications
+  -> downstream services observe the new Player
 
-## Threading note
+removal item
+  -> remove network and player bookkeeping
+  -> fire PlayerRemoving and disconnecting notifications
+  -> release dependent references
+```
 
-`0x102ee57de` (decompiled) is the cross-thread wake/dispatch helper used after
-enqueue: thread primitives (`0x10320xxxx`), dispatch-to-main registration
-(`"AppleMainThreadBlockingFix"`). Replication receive → deserialize → apply
-crosses threads through the same job-queue machinery as scripting (doc 04).
+Join opcodes and wire fields are not claimed here. The boundary is: client
+calls require a `Player` under `game.Players`, and consumers hear
+lifecycle events after membership changes.
 
-## What is actually known about RakNet here
+## Voice
 
-RakNet is a compiled transport layer, not the replication schema. The image
-contains `RakPeer`, `RakPeerInterface`, `RakNetSocket`,
-`CCRakNetSlidingWindow`, `BitStream`, and `RBX::Network::RakNetConnection`
-types. Its receive loop handles socket/RakNet packet production, acknowledgements,
-NAKs, split-packet reassembly, and packet-return ownership. Roblox's
-`Replicator` then interprets the resulting application payload and produces
-typed items such as `DeserializedNewObjectItem`,
-`DeserializedChangePropertyItem`, `DeserializedDeleteInstanceItem`,
-`DeserializedEventInvocationItem`, and join-data items.
+Voice is separate: realtime media, Stratus sessions, WebRTC input and
+implementation, cross-experience voice control, and voice-chat logs and
+control plane.
 
-The inspected deserializer has two important limits: the exact wire schema and
-the helper type names are not recoverable from this build's hidden RBX symbols,
-and the shown pseudocode is compiler output rather than source. Therefore the
-C++ example models ownership and stage boundaries, not a claimed compatible
-RakNet packet format.
+## Threading
 
-## C++ sketch
+After enqueue, the cross-thread wake helper at `0x102ee57de` moves work to
+workers and can bounce UI work to the main thread
+(`AppleMainThreadBlockingFix`). Receive, deserialize, and apply cross
+threads through the same job machinery as scripting.
 
-`include/rbx/replicator.hpp` — `Transport → PacketQueue → Deserializer →
-Replicator → DataModel apply` interfaces plus an ownership-gate example shaped
-by the observed rules. No wire-format constants are claimed (not observed).
+## RakNet in this build
+
+RakNet is the transport, not the replication schema. Present types include
+`RakPeer`, `RakPeerInterface`, `RakNetSocket`,
+`CCRakNetSlidingWindow`, `BitStream`, and `RBX::Network::RakNetConnection`.
+
+The receive loop handles socket production, acknowledgements, negative
+acknowledgements, split-packet reassembly, and packet-return ownership.
+The replicator then produces items such as
+`DeserializedNewObjectItem`, `DeserializedChangePropertyItem`,
+`DeserializedDeleteInstanceItem`, `DeserializedEventInvocationItem`, and
+join-data items.
+
+Behavior in code form:
+
+```cpp
+// Simplified illustration.
+void onPacketReceived(Packet packet) {
+  auto changes = decode(packet);  // bytes -> typed items
+  applyToDataModel(changes);      // gated by ownership and location
+}
+
+bool canApply(const Instance& target) {
+  // Only Workspace members replicate and predict.
+  return target.isDescendantOf(workspace());
+}
+```
+
+No wire-format constants are claimed. The C++ model covers ownership and
+stage boundaries only. See `include/rbx/replicator.hpp`.
+
+## Addresses in this build
+
+| Place | Address |
+|---|---|
+| Deeplink handler | `ram:0x1000376fd` |
+| Session accessor | `ram:0x1051e5369` |
+| Receive loop | `ram:0x102d606da` |
+| Buffered deserializer | `ram:0x10564dd3c` |
+| Cross-thread wake | `ram:0x102ee57de` |
+
+## What is not claimed
+
+- Exact packet opcodes and field codecs.
+- Helper names behind internal deserialize calls.
+- Tunable budget values for other builds.

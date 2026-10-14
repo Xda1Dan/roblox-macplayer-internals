@@ -50,7 +50,7 @@ state, and plugin/core special cases all feed one boolean.
 | size | `0x3b9` bytes |
 | callers | script-start path, plugin restart path |
 | emits | `Cannot start {client,server} script '%s' (lacking capability …)` |
-| confidence | high (predicate body inspected) |
+| covered here | permission dispatch and error lines |
 
 **Step by step**
 
@@ -119,7 +119,7 @@ objects, invoke the start helper, install result/error continuations.
 | entry | `ram:0x10158ac46` |
 | size | `0xc70` bytes |
 | logs | `[FLog::ScriptContextAdd] LoaderFacet::addScript -- %s`, `Running script %p`, `Script Start` scope, `startScript re-entrancy has exceeded 3` |
-| confidence | high (full body inspected) |
+| covered here | start path, ownership, and continuations |
 
 **Step by step**
 
@@ -195,7 +195,7 @@ VM, record timing.
 | size | `0x814` bytes |
 | logs | `Resuming script: %p`, `Pending script name: %s` |
 | hard limits | C-stack depth `> 200` → `C stack overflow`; past shutdown deadline → refuse |
-| confidence | high |
+| covered here | entry, inputs, and exits |
 
 **Step by step**
 
@@ -240,7 +240,7 @@ ever blocking the OS thread. This is the function that makes
 | entry | `ram:0x1014cf74a` |
 | size | `0x246` bytes |
 | rejects | `task.wait is not available for AuroraScripts`, `thread is not yieldable` |
-| confidence | high |
+| covered here | entry, inputs, and exits |
 
 **Step by step**
 
@@ -270,7 +270,7 @@ cycle detection, destruction invalidation, and exactly-one-value enforcement.
 | entry | `ram:0x10158dd88` |
 | size | `0x80e` bytes |
 | errors | RobloxScript↔non-RobloxScript mismatches, `.config` rejection, recursive-require diagnostic, `Requested module has been destroyed…`, `…experienced an error while loading`, `Module code did not return exactly one value`, `Unknown module state` |
-| confidence | high |
+| covered here | entry, inputs, and exits |
 
 **Step by step**
 
@@ -348,7 +348,7 @@ that does is a use-after-free by construction.
 
 - Exact `lua_State` field offsets and helper names behind the VM calls.
 - The `luau_execute` (`0x29adfd3`) body/call convention — entry confirmed,
-  body not decompiled.
+  body is highly optimized and not detailed here.
 - `task.spawn` (`0x14cff67`) wrapper semantics — entry is a small
   task-library helper; caller trace still needed.
 - Exact waiting-queue budget/deadline tunables per build.

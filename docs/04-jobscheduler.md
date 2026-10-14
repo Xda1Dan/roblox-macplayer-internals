@@ -1,105 +1,141 @@
-# TaskScheduler + job system
+# Scheduler reference
 
-The engine does almost no work inline. ObjC entry points, Lua callbacks,
-network receives, and frame steps all become **jobs**: small refcounted
-objects submitted to sharded mutex-guarded queues, run by worker threads, with
-explicit cross-thread wakeups.
+In one paragraph: almost nothing runs inline. App callbacks, network
+receives, Lua callbacks, and frame steps become small refcounted jobs.
+They are copied into sharded queues under a mutex, appended to a ring,
+and run by workers after an explicit wakeup.
 
-## Submit path (`ram:0x10521311e` → `0x104f54dc6` → `0x104f54c96`)
+## Submit path
 
-1. Caller holds the scheduler singleton (`0x10520e072` → `0x107c54890`,
-   call-once initialized) and a payload struct of shared_ptrs.
-2. `0x10521311e` (0x260 bytes) locks the payload's `weak_ptr`, allocates a
-   0x30-byte job object (vtable `0x10742d0f0`) capturing scheduler + payload
-   with `LOCK`-guarded refcount bumps, then calls `0x104f54dc6`.
-3. `0x104f54dc6` (0x4a1 bytes) copies the item and calls
-   `0x104f54c96(scheduler, item, queueIndex)`, then destroys the temp
+`ram:0x10521311e` → `0x104f54dc6` → `0x104f54c96`
+
+1. The caller holds the scheduler singleton (`0x10520e072` →
+   `0x107c54890`, initialized once) and a payload of shared pointers.
+2. `0x10521311e` (0x260 bytes) locks the payload, builds a 0x30-byte job
+   object (vtable `0x10742d0f0`), bumps reference counts atomically, and
+   calls `0x104f54dc6`.
+3. `0x104f54dc6` (0x4a1 bytes) copies the item, calls
+   `0x104f54c96(scheduler, item, queueIndex)`, then destroys the temporary
    (`0x104544be6`).
 4. `0x104f54c96` (0xf7 bytes):
-   - lock mutex at `sched+0x778`, unlock on scope exit;
-   - index the queue array at `sched+0x780` by `index * 0x10`;
-   - copy the item in, insert with `0x104f54876(queue+0x1b0)` →
+   - lock the mutex at `scheduler+0x778`, unlock on scope exit;
+   - select the queue at `scheduler+0x780` by `index * 0x10`;
+   - copy the item in, insert with `0x104f54876(queue+0x1b0)` into
      `0x104545ba0`;
    - wake workers with `0x102ee57de`.
-5. `0x102ee57de` (0x313 bytes): thread-primitive juggling plus
-   dispatch-to-main registration (`"AppleMainThreadBlockingFix"`,
-   key `_DAT_10780cf10`) — this is also how background threads bounce UI work
-   to the AppKit thread.
+5. `0x102ee57de` (0x313 bytes) handles thread wakeup plus main-thread
+   dispatch (`AppleMainThreadBlockingFix`, key `_DAT_10780cf10`). This is
+   also how background threads hand UI work to the app thread.
 
-## Queue internals
+Behavior in code form:
 
-* `0x104545ba0` (0xc3 bytes) copies a contiguous range of 0x80-byte queue
-  records into a circular buffer. It grows capacity by 1.5x (`cap*3>>1`,
-  minimum 4), then rehomes records using the old head offset and current
-  count. The expression `((count + head) % capacity) * 0x80` is the ring
-  placement calculation; this is not an open-addressing hash table.
-* `0x10453826a` (0x52 bytes) is the item copy used at enqueue time — payloads
-  are copied under the lock, never referenced.
-* Worker side waits on a predicate and pops one item per wakeup (see
-  `TaskScheduler::runOne` in `include/rbx/scheduler.hpp`).
+```cpp
+// Simplified illustration.
+void submit(Job job, size_t shard = 0) {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    queues_[shard % queues_.size()].push(std::move(job));
+  }
+  wake_.notify_one();
+}
+```
 
-## Guard patterns used everywhere
+## Queue storage
+
+- `0x104545ba0` (0xc3 bytes) copies 0x80-byte records into a circular
+  buffer. Capacity grows by 1.5x (`cap*3/2`, minimum 4), then records move
+  using the old head offset and current count. Placement is
+  `((count + head) % capacity) * 0x80`. This is a ring, not a hash table.
+- `0x10453826a` (0x52 bytes) copies the item at enqueue time. Payloads are
+  copied under the lock, never referenced.
+- Workers wait on a predicate and pop one item per wakeup. See
+  `TaskScheduler::runOne` in `include/rbx/scheduler.hpp`.
+
+## Common patterns
 
 | Pattern | Shape | Example |
 |---|---|---|
-| Init flag | 1-byte check + call-once, `+0x108` on client structs | `0x1051efba0` (0xc bytes) reads it; `AppUpdateAdapter::init` sets it |
-| Seqlock lazy global | 30-bit counter + `0x80000000` busy bit, resolve-once via vtable `+0x30` | `0x10003ddee` → `0x10748fb28` |
-| Call-once singletons | guard byte + init + `cxa_atexit` destructor | `0x10118fab6` → `0x107a61588`, `0x105235e96` → `0x107510308` |
-| Shared ownership | `LOCK`-inc/dec, `__shared_weak_count::__release_weak` at zero | every job, event, and DataModel handoff |
-| Stack protection | `__stack_chk_guard` canary + `___stack_chk_fail` | every ObjC entry and engine function above |
+| Init flag | 1-byte check plus once-only init, `+0x108` on client structs | `0x1051efba0` reads it; app-update init sets it |
+| Lazy global with busy bit | 30-bit counter plus `0x80000000` busy bit, resolve once via vtable `+0x30` | `0x10003ddee` → `0x10748fb28` |
+| Once-only singleton | guard byte, init, destructor at exit | `0x10118fab6` → `0x107a61588`, `0x105235e96` → `0x107510308` |
+| Shared ownership | atomic increment and decrement, weak release at zero | every job, event, and DataModel handoff |
+| Stack guard | canary plus failure handler | every app entry and engine function above |
 
 ## Frame jobs
 
-Each frame the scheduler runs, among others:
-
 | Job | Role |
 |---|---|
-| `Heartbeat` / `Stepped` | fixed-step simulation + script stepping |
-| `RenderStepped` / `PreRender` / `PostSimulation` | render sync points scripts can hook |
-| `DeserializePacketsJob` | drain the network receive queue into the replicator |
-| `WaitingHybridScriptsJob` | resume yielded script threads (Lua coroutines) |
+| `Heartbeat` / `Stepped` | fixed-step simulation and script stepping |
+| `RenderStepped` / `PreRender` / `PostSimulation` | render sync points for scripts |
+| `DeserializePacketsJob` | drain the network receive queue |
+| `WaitingHybridScriptsJob` | resume yielded script threads |
 | `ParallelLuauWorkQueue::executePendingWork` | Actor-isolated parallel Lua |
-| `GcJob` / `ClearUnusedLuaRefsJob` | incremental Luau GC assist + stale ref cleanup |
-| `TelemetryJob` / `LuauHeapMemoryReportProcess` | sampling + memory telemetry |
+| `GcJob` / `ClearUnusedLuaRefsJob` | incremental GC help and stale-reference cleanup |
+| `TelemetryJob` / `LuauHeapMemoryReportProcess` | sampling and memory telemetry |
 
-`include/rbx/scheduler.hpp` + `src/jobqueue_demo.cpp` model the
-mutex/shard/wake discipline with worker threads.
+See `include/rbx/scheduler.hpp` and `src/jobqueue_demo.cpp`.
 
-## Job execution and node allocation
+## Run and node pool
 
-The job-start wrapper at `ram:0x102eec6da` marks a job active, logs its
-arbiter/start timestamp, then invokes the virtual step at vtable offset
-`+0x10`. This confirms that job execution is polymorphic: the scheduler does
-not contain a large switch over every job type.
+The start wrapper at `ram:0x102eec6da` marks a job active, logs arbiter
+and start time, then calls the step function at vtable offset `+0x10`.
+Dispatch is polymorphic. There is no large switch over job types.
 
-The matching stop wrapper at `ram:0x102eec76c` clears the active bit, calls the
-virtual stop hook at `+0x18`, records elapsed time and stop timestamp, updates
-the arbiter, and emits `JobStop`. Under profiling flags it also records the
-worker thread and job name in a bounded per-thread diagnostic ring.
+The stop wrapper at `ram:0x102eec76c` clears the active bit, calls the
+stop hook at `+0x18`, records elapsed and stop time, updates the arbiter,
+and emits `JobStop`. Profiling builds also record worker thread and job
+name in a bounded diagnostic ring.
 
-The allocator at `ram:0x102ee3136` obtains a free node from a scheduler-owned
-pool, copies the job's shared state with atomic reference-count increments,
-updates a deadline/priority-like atomic value, and publishes the node through
-an indexed table using compare/exchange-style locking. Exhaustion is a hard
-diagnostic: `Out of job nodes. Check for job leaks and/or increase the
-FInt::TaskSchedulerMaxNumOfJobs value`.
+The allocator at `ram:0x102ee3136` takes a free node from a bounded pool,
+copies shared job state with atomic increments, updates a
+deadline-like atomic value, and publishes through an indexed table with
+locked compare-and-exchange behavior. Exhaustion is fatal:
 
-The diagnostic routine at `ram:0x102ee6a60` walks the scheduler's active job
-range and prints each job's name, state, and elapsed seconds. The binary also
-contains explicit limits for maximum jobs, maximum arbiters, job deadlines,
-thread counts, stack sizes, and per-cycle task budgets.
+```text
+Out of job nodes. Check for job leaks and/or increase the
+FInt::TaskSchedulerMaxNumOfJobs value
+```
 
-The current C++ example intentionally uses `std::function` queues rather than
-pretending to reproduce the private node-table offsets. The observed model is:
+The diagnostic at `ram:0x102ee6a60` walks active jobs and prints name,
+state, and elapsed seconds. Limits exist for jobs, arbiters, deadlines,
+threads, stack sizes, and per-cycle budgets.
+
+Behavior in code form:
 
 ```cpp
-JobNode* node = nodePool.acquire();       // bounded; exhaustion is fatal
+// Simplified illustration.
+JobNode* node = nodePool.acquire();  // bounded; empty is fatal
 node->job = sharedJob;
 node->deadline = job->deadline();
-arbiter.publish(node);                    // atomic publication
+arbiter.publish(node);               // atomic
 worker:
-    node = arbiter.next();
-    node->active = true;
-    node->job->step(stats);               // virtual +0x10-shaped dispatch
-    nodePool.release(node);
+  node = arbiter.next();
+  node->active = true;
+  node->job->step(stats);            // virtual dispatch
+  nodePool.release(node);
 ```
+
+The C++ example uses `std::function` queues on purpose. It shows the
+mutex, shard, and wakeup discipline without claiming private table
+offsets.
+
+## Addresses in this build
+
+| Place | Address |
+|---|---|
+| Scheduler singleton | `ram:0x10520e072` → `0x107c54890` |
+| Job build | `ram:0x10521311e` |
+| Job dispatch | `ram:0x104f54dc6` |
+| Enqueue | `ram:0x104f54c96` |
+| Ring insert | `ram:0x104f54876` → `0x104545ba0` |
+| Wake | `ram:0x102ee57de` |
+| Job start | `ram:0x102eec6da` |
+| Job stop | `ram:0x102eec76c` |
+| Node allocator | `ram:0x102ee3136` |
+| Job diagnostics | `ram:0x102ee6a60` |
+
+## What is not claimed
+
+- Worker entry and work-stealing policy between shards.
+- Exact arbiter priority weights.
+- Per-class cycle budgets for other builds.

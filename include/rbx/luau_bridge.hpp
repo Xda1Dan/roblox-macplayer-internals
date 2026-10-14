@@ -1,19 +1,27 @@
-// Illustrative reconstruction: how the engine hosts Luau.
-// API shapes follow Luau OSS (VM/include/lua.h, Require.h); the player plugs
-// a DataModel-backed require navigator and verifies bytecode at luau_load.
-// Original glue code, MIT. Needs Luau OSS headers to compile.
+// Luau hosting: how the player owns a lua_State and runs code on it.
+//
+// What this shows:
+// - one VM collection owns states; scripts borrow threads;
+// - creation: allocator + context, state init, hooks, libraries, _G,
+//   sandbox (see 0x10299fd5b, 0x1015b92cd);
+// - loading: policy check, cache or compile, bytecode check, load;
+// - running: resume with deadline and stack guards; task.wait yields
+//   instead of sleeping (see 0x1015566d6, 0x14cf74a).
+//
+// Needs public Luau headers to compile the optional demo.
+// Original illustration, MIT.
 #pragma once
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
-#include <functional>
 
-// Provided by Luau OSS (github.com/luau-lang/luau), NOT vendored here.
+// Provided by public Luau, NOT vendored here.
 #include "lua.h"
 #include "luacode.h"   // luau_compile
 #include "lualib.h"    // luaL_openlibs
-#include "Luau/Require.h" // luarequire_Configuration
+#include "Luau/Require.h"
 
 namespace rbx {
 
@@ -23,8 +31,8 @@ struct ScriptExecutionPolicy {
     bool trustedBytecode = false;
 };
 
-// Native loader stages visible in the player: policy gate, cache/compile,
-// then VM load/resume. This is an illustrative interface, not engine code.
+// Policy check, then cache or compile. Mirrors the native order:
+// gate first, bytes second, VM third.
 class ScriptExecutionPipeline {
 public:
     using PolicyCheck = std::function<bool(const ScriptExecutionPolicy&)>;
@@ -45,13 +53,13 @@ private:
     CacheLookup cache_;
 };
 
-// One pooled VM lane (cf. VmCollectionFacet: acquire/release).
+// One pooled lane: a coroutine sharing its owner's global state.
 class LuaLane {
 public:
     explicit LuaLane(lua_State* global) : thread_(lua_newthread(global)) {}
     lua_State* get() const { return thread_; }
 private:
-    lua_State* thread_; // coroutine stack sharing global_State
+    lua_State* thread_;
 };
 
 struct LuaStateConfig {
@@ -63,8 +71,8 @@ struct LuaStateConfig {
     bool robloxBindingsInstalled = false;
 };
 
-// Shape of the observed ScriptContext-owned VM collection. A real engine
-// supplies its allocator, callback hooks, libraries, globals, and bindings.
+// The collection owns states. Callers supply the allocator, hooks,
+// libraries, globals, and bindings.
 class VmCollection {
 public:
     using Allocator = void* (*)(void*, void*, size_t, size_t);
@@ -79,8 +87,6 @@ public:
         config_.allocatorContext = context;
         panicHook_ = panicHook;
         interruptHook_ = interruptHook;
-        // The actual player calls lua_newstate and then installs libraries and
-        // bindings. This reconstruction intentionally does not fake a VM.
         created_ = true;
         return true;
     }
@@ -98,8 +104,8 @@ private:
 
 enum class CoroutineStatus { Running, Suspended, Waiting, Completed, Failed };
 
-// Engine-owned task.wait shape: schedule a wake deadline and return control
-// to the VM. It is not an OS sleep and must only run on a yieldable thread.
+// task.wait: record a wake deadline and yield. Never an OS sleep, and
+// only valid on a yieldable thread.
 struct WaitRequest {
     double seconds = 0.0;
     double wakeAt = 0.0;
@@ -114,8 +120,8 @@ inline bool scheduleTaskWait(WaitRequest& request, double now) {
     return true;
 }
 
-// Compile-then-load boundary with a verification hook where the player's
-// "Bytecode Auth Check" lives (before luau_load ever sees the bytes).
+// Compile, check, then load. The check runs before luau_load ever sees
+// the bytes ("Bytecode Auth Check missing or wrong version").
 inline int verifiedLoad(lua_State* L, const char* chunkName,
                         const char* source, size_t size,
                         bool (*authFn)(const char*, size_t)) {
@@ -124,7 +130,7 @@ inline int verifiedLoad(lua_State* L, const char* chunkName,
     if (!bytecode) return LUA_ERRSYNTAX;
     int ok = LUA_OK;
     if (authFn && !authFn(bytecode, bytecodeSize)) {
-        ok = LUA_ERRERR; // "Bytecode Auth Check missing or wrong version"
+        ok = LUA_ERRERR;
     } else {
         ok = luau_load(L, chunkName, bytecode, bytecodeSize, 0);
     }

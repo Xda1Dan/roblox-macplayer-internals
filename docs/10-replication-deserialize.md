@@ -36,7 +36,7 @@ budget/deadline.
 | size | 0xde0 bytes |
 | frame | `SUB RSP,0xb98` - large scratch for temp records + queue cursors |
 | locks | queue mutex at `RBX+0x188` (`0x10320983c` / unlock on exit paths) |
-| confidence | high (prologue + loop head inspected; full body partially sampled) |
+| covered here | prologue, queue lock, cursors, drain loop head |
 
 **Step by step (prologue in order)**
 

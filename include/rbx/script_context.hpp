@@ -1,6 +1,17 @@
-// Illustrative reconstruction: ScriptContext service + facets.
-// Names mirror observed facet/method shapes (ProtectedString source,
-// Security::Identity, per-VM module state). Original code, MIT.
+// ScriptContext: the service that owns script execution.
+//
+// What this shows:
+// - permission check: RunContext + capabilities + identity + ancestry
+//   (see 0x10142a7a6);
+// - start: at most 3 nested starts, "Script Start" region, VM handoff,
+//   shared ownership across callbacks (see 0x10158ac46);
+// - modules: per-VM cache with loading / cycle / destroyed states
+//   (see 0x10158dd88);
+// - callbacks: weak script first, then only suspended / awaiting
+//   coroutines may resume (see 0x101557e8c, 0x1015977c1);
+// - shutdown: drain waiters, then release VMs (see 0x1015a7d1e).
+//
+// Original illustration, MIT.
 #pragma once
 #include <memory>
 #include <string>
@@ -21,6 +32,11 @@ enum class ScriptCapability : uint64_t {
     RunServerScript = 1ull << 9,
 };
 
+// Example:
+//
+//   ExecutionContext ctx{RunContext::Server, {2}, caps};
+//   if (!ctx.admitsScript()) return deny("RunServerScript");
+//   if (!context.tryEnterScript()) return fatal("re-entrancy");
 struct ExecutionContext {
     RunContext runContext = RunContext::Legacy;
     SecurityIdentity identity;
@@ -30,12 +46,14 @@ struct ExecutionContext {
         return (capabilities & static_cast<uint64_t>(capability)) != 0;
     }
 
+    // Server needs RunServerScript, client needs RunClientScript.
+    // Plugin and legacy take extra native branches.
     bool admitsScript() const {
         switch (runContext) {
         case RunContext::Client: return has(ScriptCapability::RunClientScript);
         case RunContext::Server: return has(ScriptCapability::RunServerScript);
         case RunContext::Plugin:
-        case RunContext::Legacy: return true; // additional native gates apply
+        case RunContext::Legacy: return true;
         }
         return false;
     }
@@ -50,7 +68,6 @@ public:
         virtual ~LoaderFacet() = default;
         virtual void addScript(std::shared_ptr<Instance> script) = 0;
         virtual void removeScript(std::shared_ptr<Instance> script) = 0;
-        // Module loading from instance / asset id / library path.
         virtual Tuple requireModule(lua_State* L, std::shared_ptr<Instance> module) = 0;
         virtual void handleModuleResult(lua_State* L, Tuple result) = 0;
         virtual void callAsyncCallback(SecurityIdentity id, ProtectedString source,
@@ -58,7 +75,7 @@ public:
     };
     struct SchedulerFacet {
         virtual ~SchedulerFacet() = default;
-        virtual void resumeWaitingScripts() = 0; // WaitingHybridScriptsJob path
+        virtual void resumeWaitingScripts() = 0;
     };
     struct ExecutorFacet {
         virtual ~ExecutorFacet() = default;
@@ -70,7 +87,7 @@ public:
     };
     struct VmCollectionFacet {
         virtual ~VmCollectionFacet() = default;
-        virtual lua_State* acquireVm() = 0; // lane from the pool
+        virtual lua_State* acquireVm() = 0;
         virtual void releaseVm(lua_State* L) = 0;
         virtual size_t stateThreadCount() const = 0;
     };
@@ -80,7 +97,7 @@ public:
     ExecutorFacet& executor();
     VmCollectionFacet& vms();
 
-    // Observed invariant: startScript rejects nesting beyond three levels.
+    // At most 3 nested starts; deeper nesting fails.
     unsigned startDepth() const { return startDepth_; }
     bool tryEnterScript() {
         if (startDepth_ >= 3) return false;
@@ -93,20 +110,13 @@ private:
     unsigned startDepth_ = 0;
 };
 
-// Script instance kinds observed in the binary.
 enum class ScriptKind { Script, LocalScript, ModuleScript, CoreScript };
 
-enum class ModuleState {
-    Unloaded,
-    Loading,
-    Loaded,
-    Failed,
-    Destroyed,
-};
+enum class ModuleState { Unloaded, Loading, Loaded, Failed, Destroyed };
 
 struct ModuleResult {
     ModuleState state = ModuleState::Unloaded;
-    std::shared_ptr<const Tuple> value; // successful require returns one value
+    std::shared_ptr<const Tuple> value; // success holds exactly one value
     std::string error;
 };
 
@@ -119,9 +129,8 @@ struct AsyncCallbackResult {
     std::string error;
 };
 
-// The native callback path first resolves the weak script reference and then
-// admits only a resumable coroutine. The VM-specific resume is intentionally
-// left behind this interface.
+// Weak script first, then coroutine state. Only suspended / awaiting
+// coroutines may resume.
 class AsyncCallbackGate {
 public:
     static AsyncCallbackResult admit(bool scriptStillAlive,
@@ -137,13 +146,13 @@ public:
     }
 };
 
-// Per-VM state is intentionally separate from the ModuleScript instance.
-// The native path caches results, detects cycles, and invalidates destruction.
+// One cache entry per VM. Tracks loads, cycles, failures, and destruction.
 class ModulePerVmState {
 public:
     ModuleResult result;
     bool loadingOnCurrentStack = false;
 
+    // Returns true when the caller should perform the load.
     bool beginLoad() {
         if (result.state == ModuleState::Destroyed ||
             result.state == ModuleState::Loaded)
@@ -174,8 +183,7 @@ public:
     }
 };
 
-// Destruction order follows the native lifetime boundary: stop admission,
-// drain waiting work, release VM lanes, then invalidate the context.
+// Shutdown order: stop admission, drain waiters, release VMs.
 class ScriptContextLifetime {
 public:
     bool closing() const { return closing_; }
@@ -204,7 +212,7 @@ private:
 struct ScriptOptions {
     ScriptKind kind = ScriptKind::Script;
     std::string runContext; // "Server" | "Client" | "Plugin" | "Legacy"
-    bool canRunClient = false; // Run{Client,Server}Script capabilities
+    bool canRunClient = false;
     bool canRunServer = false;
 };
 

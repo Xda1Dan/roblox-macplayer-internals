@@ -1,58 +1,68 @@
-# DataModel: what it is and what it contains
+# DataModel
 
-## What it is
+In one paragraph: the DataModel is the root of one game session. Every
+service hangs off it. Join creates it. Leave, teleport, or shutdown drains
+dependent work first, then clears services one by one, then releases script
+state. If you keep a raw pointer across close, it will betray you.
 
-`RBX::DataModel` is the **root `Instance`** of one game session and the
-`ServiceProvider` everything resolves against (230 references). Code paths
-uniformly assume "current DataModel or nothing": `AssetService::* … DataModel
-is null`, `createSessionFromAssetID: DataModel not available`,
-`Cannot predict instance {}: Only instances under Workspace can be predicted`.
+## Big picture
 
-It is **per-session, not a global singleton**: created on join
-(`BringUpDataModel`), destroyed on leave/teleport (`CloseDataModel` →
-`Closing Script Context` → scheduler drain → VM pool free,
-`LogOnDMSetShuttingDown`). The nearby singletons are a factory/manager
-(`0x105235e96` → `0x107510308`, call-once guarded) and a global manager
-(`0x10118fab6` → `0x107a61588` + destructor at exit). Session lookup for
-deeplinks and leave-game goes through `0x1051e5369` (live lookup via
-`0x100043b24` + virtual `0x1051e9b6a`, or locator call with key
-`0x107510170`).
+```text
+JoinRequested (deeplink / protocol)
+  -> BringUpDataModel
+  -> AppUpdateAdapter init ("MacDesktopClient")
+  -> scheduler handoff
+  -> Running (frame jobs)
+  -> Leaving (session reports, telemetry)
+  -> CloseDataModel
+  -> scheduler drain
+  -> VM pool release
+  -> NoSession
+```
 
-## Service catalog (338 names found in the binary)
+Teleport is `Running -> Leaving -> JoinRequested`.
 
-Player-facing services (present in a running game):
+Session lookup for deeplinks and leave-game goes through `0x1051e5369`.
+Nearby singletons are a factory/manager (`0x105235e96` → `0x107510308`)
+and a global manager (`0x10118fab6` → `0x107a61588`).
 
-*World*: `Workspace`, `Lighting`, `MaterialService`,
-`Teams`, `StarterPack`, `StarterGui`,
-`StarterPlayer`, `ReplicatedFirst`, `ReplicatedStorage`, `ServerStorage`,
-`ServerScriptService`, `SoundService`, `TweenService`, `DebrisService`,
-`CollectionService`, `ProximityPromptService`, `PathfindingService`,
-`ContextActionService`, `UserInputService`, `GamepadService`, `HapticService`,
-`VRService`, `GuiService`, `TextService`, `TextChatService`, `ChatService`,
+## Services
+
+338 service-like names appear in the binary. The player-facing set in a
+running game includes:
+
+**World:** `Workspace`, `Lighting`, `MaterialService`, `Teams`,
+`StarterPack`, `StarterGui`, `StarterPlayer`, `ReplicatedFirst`,
+`ReplicatedStorage`, `ServerStorage`, `ServerScriptService`,
+`SoundService`, `TweenService`, `DebrisService`, `CollectionService`,
+`ProximityPromptService`, `PathfindingService`, `ContextActionService`,
+`UserInputService`, `GamepadService`, `HapticService`, `VRService`,
+`GuiService`, `TextService`, `TextChatService`, `ChatService`,
 `VoiceChatService`, `RunService`, `TimerService`.
 
-*Players & social*: `PlayersService`/`Players`, `PlayerDataService`,
+**Players and social:** `Players` / `PlayersService`, `PlayerDataService`,
 `FriendService`, `GroupService`, `SocialService`, `ChatService`,
 `UGCAvatarService`, `AvatarChatService`, `AvatarCreationService`,
 `AvatarEditorService`, `ThirdPartyUserService`, `UserService`,
 `PlayerEmulatorService`, `PartyEmulatorService`.
 
-*Persistence & commerce*: `DataStoreService`, `MemoryStoreService`,
+**Saving and commerce:** `DataStoreService`, `MemoryStoreService`,
 `MarketplaceService`, `BadgeService`, `GamePassService`, `PointsService`,
-`CommerceService`, `OpenCloudService` — plus
-`AssetService`, `InsertService`, `PackageService`, `UGCValidationService`,
+`CommerceService`, `OpenCloudService`, plus `AssetService`,
+`InsertService`, `PackageService`, `UGCValidationService`,
 `PublishService`, `VersionControlService`, `TeamCreateService`.
 
-*Scripting support*: `ScriptContext` (a service itself),
+**Scripting:** `ScriptContext` (itself a service),
 `CoreScriptSyncService`, `ScriptDebuggerService`, `ScriptProfilerService`,
 `ScriptRegistrationService`, `ScriptService`, `ServerScriptService`,
-`ModuleScript` hosting, `LuauExpressionService`, `LuauScriptAnalyzerService`,
-`LiveScriptingService`, `TestService`, `ScriptChangeService`.
+`ModuleScript` hosting, `LuauExpressionService`,
+`LuauScriptAnalyzerService`, `LiveScriptingService`, `TestService`,
+`ScriptChangeService`.
 
-*Media/capture*: `CaptureService`, `VideoCaptureService`,
+**Media and capture:** `CaptureService`, `VideoCaptureService`,
 `VideoScreenCaptureService`, `SoundService`.
 
-*Platform/shell*: `AppUpdateService`, `AppStorageService`,
+**Platform:** `AppUpdateService`, `AppStorageService`,
 `LocalStorageService`, `UserStorageService`, `MemStorageService`,
 `PlatformCloudStorageService`, `LogService`, `NotificationService`,
 `ToastNotificationService`, `PermissionsService`, `PolicyService`,
@@ -60,90 +70,142 @@ Player-facing services (present in a running game):
 `GuidRegistryService`, `UniqueIdLookupService`, `DeviceIdService`,
 `SessionService`, `LoginService`, `TeleportService`, `MatchmakingService`.
 
-*Engine-internal*: `PhysicsService`, `ProcessInstancePhysicsService`,
+**Engine-internal:** `PhysicsService`, `ProcessInstancePhysicsService`,
 `CSGDictionaryService`, `NonReplicatedCSGDictionaryService`,
 `JointsService`, `GeometryService`, `HeightmapImporterService`,
-`Mesh` pipeline (`FileMeshDataChunkReader`), `TextureGenerationService`,
-`MaterialGenerationService`, `ModelTranscoder` (`ModelDeliveryTrace`),
-`SlimReplicationService`, `SlimAnimationReplicationService`,
-`FileSyncService`, `LiveSyncService`, `ReflectionService`,
-`InstanceRegistryService`, `ChangeHistoryService`, `RunService`,
-`ProceduralBehaviorSchedulerService`, `SceneAnalysisService`,
-`Aerodynamics` (logs), `HeatmapService`, `RbxAnalyticsService`,
-`TelemetryService`, `EventIngestService`, `IXPService` (experiments),
+`FileMeshDataChunkReader`, `TextureGenerationService`,
+`MaterialGenerationService`, `ModelTranscoder`, `SlimReplicationService`,
+`SlimAnimationReplicationService`, `FileSyncService`, `LiveSyncService`,
+`ReflectionService`, `InstanceRegistryService`, `ChangeHistoryService`,
+`RunService`, `ProceduralBehaviorSchedulerService`,
+`SceneAnalysisService`, `HeatmapService`, `RbxAnalyticsService`,
+`TelemetryService`, `EventIngestService`, `IXPService`,
 `LocalizationService`, `ModerationService`, `SafetyService`,
 `CrossExperienceVoiceController`, `ExperienceAuthService`,
 `ExperienceNotificationService`, `ExperienceService`,
-`RtcMessaging`/`RtMessagingService`, `MessageBusService`,
-`InternalMessagingService`, `RequestOrchestratorService`,
-`CloudCRUDService`, `CloudExecutionService`, `OpenCloudService`.
+`RtMessagingService`, `MessageBusService`, `InternalMessagingService`,
+`RequestOrchestratorService`, `CloudCRUDService`,
+`CloudExecutionService`, `OpenCloudService`.
 
-Studio-only / test / mock / flag-gated (shipped in the player binary but not
-active in games): the `Studio*` family, `Enable*`/`DebugEnable*` toggles,
-`Mock*`, `TestService*`, `DummyService`, `NoService`, `ExampleV2Service`,
-`ReflectionService` (test helper).
+Studio-only, test, mock, and flag-gated names ship in the player but do
+not run in games: `Studio*`, `Enable*` / `DebugEnable*`, `Mock*`,
+`TestService*`, `DummyService`, `NoService`, `ExampleV2Service`.
 
-## How Lua sees it: Reflection
+## How Lua sees it
 
-Descriptor counts: `PropDescriptor` 3089, `BoundFuncDesc` 1692, `EventDesc`
-649, `EnumDesc` 588, `TypedPropertyDescriptor` 505, `BoundYieldFuncDesc` 413,
-plus `ClassDescriptor`, `DescribedBase`, `FunctionDescriptor::Arguments`,
-`ValueTable`, `Variant`, `Tuple`, `RefPropertyDescriptor`,
-`TypedPropertyDescriptor<T>` per engine type. Values cross as `Variant`
-(`LuauBuffer`, `LuauInteger`, `LuauCollectionHandle` bridge types).
-`include/rbx/reflection.hpp` + `src/reflection_demo.cpp` model registration,
-get/set dispatch, method calls, and event connections.
+Every class, property, method, and event is described by a descriptor row.
+Script access dispatches through those rows.
 
-## Players service
+Descriptor families in this build:
 
-`Players` is a reflected DataModel service with a larger surface than simple
-player storage. The service registration body at `ram:0x100bae0c0` declares
-player lifecycle events including `PlayerAdded`, `PlayerRemoving`,
-`PlayerConnecting`, `PlayerDisconnecting`, `PlayerRejoining`,
-`PlayerMembershipChanged`, and `PlayerChatted`. The larger registration body
-at `ram:0x100bac24b` exposes operations such as `getPlayers`,
-`playerFromCharacter`, `ResetLocalPlayer`, user/name/thumbnail requests,
-character-description creation, moderation/ban APIs, and chat helpers.
+| Family | Count |
+|---|---|
+| `PropDescriptor` | 3089 |
+| `BoundFuncDesc` | 1692 |
+| `EventDesc` | 649 |
+| `EnumDesc` | 588 |
+| `TypedPropertyDescriptor` | 505 |
+| `BoundYieldFuncDesc` | 413 |
 
-The reflected properties include `CharacterAutoLoads`, `MaxPlayers`,
+Plus `ClassDescriptor`, `DescribedBase`, `FunctionDescriptor::Arguments`,
+`ValueTable`, `Variant`, `Tuple`, `RefPropertyDescriptor`, and typed
+property descriptors per engine type. Values cross as `Variant` values.
+
+Example — reading a property the way the engine does:
+
+```cpp
+// Simplified illustration.
+Variant v = instance.getProperty("Name");
+if (v.type == Variant::Type::String)
+  print(v.str);
+```
+
+Example — firing an event:
+
+```cpp
+// Simplified illustration.
+plate.touched.connections.push_back(
+  [&](const Tuple&) { print("touched"); });
+plate.touched.connections[0]({});
+```
+
+See `include/rbx/reflection.hpp` and `src/reflection_demo.cpp`.
+
+## Players
+
+`Players` is a full service, not just a list.
+
+Events declared at `ram:0x100bae0c0` include `PlayerAdded`,
+`PlayerRemoving`, `PlayerConnecting`, `PlayerDisconnecting`,
+`PlayerRejoining`, `PlayerMembershipChanged`, and `PlayerChatted`.
+Operations declared at `ram:0x100bac24b` include `getPlayers`,
+`playerFromCharacter`, `ResetLocalPlayer`, user and thumbnail lookups,
+character-description creation, moderation and ban calls, and chat helpers.
+
+Properties include `CharacterAutoLoads`, `MaxPlayers`,
 `MaxPlayersInternal`, `PreferredPlayers`, `PreferredPlayersInternal`,
-`RespawnTime`, `LocalPlayer`, `localPlayer`, `NumPlayers`, and `numPlayers`.
-These are descriptor registrations; they do not by themselves prove that a
-client can mutate every property. Native security/capability and server/client
-context checks still apply.
+`RespawnTime`, `LocalPlayer`, `localPlayer`, `NumPlayers`, and
+`numPlayers`.
 
-The player container is also an execution/replication boundary. The binary
-contains checks such as `InvokeClient: player %s must be a child of game.Players`
-and `Player:Kick() can only be called on a Player under Players`. Thus a
-`Player` instance's parent/service membership is semantically significant,
-not cosmetic.
+A `Player` used by client calls must live under `game.Players`:
 
-The binary also distinguishes several lifecycle notifications rather than one
-generic event: connecting, disconnecting, rejoining, membership changes,
-public `PlayerAdded`/`PlayerRemoving`, and local-player transitions. Some
-player/container surfaces expose a `PlayerRemoved` event separately.
+```text
+InvokeClient: player must be a child of game.Players
+Player:Kick() can only be called on a Player under Players
+```
 
-## Lifecycle state machine
+Parenting is part of security and replication, not decoration.
 
-`NoSession → JoinRequested (deeplink/protocol) → BringUpDataModel →
-AppUpdateAdapter::init("MacDesktopClient") → async scheduler handoff →
-Running (frame jobs) → Leaving (session reports, telemetry) →
-CloseDataModel → SchedulerFacet drain → VmCollectionFacet free → NoSession`,
-with teleport as `Running → Leaving → JoinRequested`.
+Lifecycle notifications stay separate: connecting, disconnecting,
+rejoining, membership changes, public `PlayerAdded` / `PlayerRemoving`,
+and local-player transitions. Some surfaces expose `PlayerRemoved`
+separately.
 
-The inspected close routine at `ram:0x104542918` performs more than a root
-state transition. It iterates service/container lists and clears selected
-contents in a defined teardown sequence, with log points for
-`StarterPack`, `StarterPlayer`, `TextChatService`, `StarterGui`, `CoreGui`,
-`Teams`, `Lighting`, `JointsService`, `TestService`,
-`ServerScriptService`, `ReplicatedStorage`, `ReplicatedFirst`,
-`ServerStorage`, `ChatService`, and `LocalizationService` among others.
-The exact list is build-specific and some entries are flag-gated. This is why
-holding an `Instance` or service pointer past close is unsafe even before the
-VM pool is destroyed.
+## Shutdown order
 
-The DataModel is therefore best modeled as an ownership/lifetime boundary:
-network and script work carries weak/shared references to it, close marks the
-boundary and drains work, then child service contents and script state are
-released in stages.
-`C++`: `include/rbx/datamodel.hpp`, demo in `src/datamodel_demo.cpp`.
+Step by step, close does this:
+
+1. Mark the DataModel shutting down.
+2. Drain scheduler work: waiting threads, then yield waiters.
+3. Clear service containers in a fixed order. Log points include
+   `StarterPack`, `StarterPlayer`, `TextChatService`, `StarterGui`,
+   `CoreGui`, `Teams`, `Lighting`, `JointsService`, `TestService`,
+   `ServerScriptService`, `ReplicatedStorage`, `ReplicatedFirst`,
+   `ServerStorage`, `ChatService`, and `LocalizationService`.
+4. Release VM state only after the drains above.
+5. Release the DataModel itself.
+
+The close routine lives at `ram:0x104542918`. The exact service list is
+build-specific and partly flag-gated.
+
+Behavior in code form:
+
+```cpp
+// Simplified illustration.
+void close(DataModel& dm) {
+  dm.setShuttingDown();      // stop new work
+  drainScheduler();          // waiting threads, yield waiters
+  clearServicesInOrder(dm);   // StarterPack, StarterGui, Lighting, ...
+  releaseVms();              // VM collection last
+}
+```
+
+C++ model: `include/rbx/datamodel.hpp`, demo in
+`src/datamodel_demo.cpp`.
+
+## Addresses in this build
+
+| Place | Address |
+|---|---|
+| Session accessor | `ram:0x1051e5369` |
+| Factory singleton | `ram:0x105235e96` → `0x107510308` |
+| Global manager | `ram:0x10118fab6` → `0x107a61588` |
+| Close routine | `ram:0x104542918` |
+| Players events | `ram:0x100bae0c0` |
+| Players operations | `ram:0x100bac24b` |
+
+## What is not claimed
+
+- Exact service offsets and vtable layouts across versions.
+- The full flag-gated service list for other builds.
+- Wire formats for replication (see the networking notes).

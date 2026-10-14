@@ -1,411 +1,237 @@
-# Scripting: ScriptContext + Luau execution
+# Scripting reference
 
-## Script lifecycle, all ten stages
+In one paragraph: scripts are `Instance` objects with source text. The
+engine decides whether they may run, compiles or loads their bytecode,
+runs them on pooled Luau threads, and lets them yield and resume later.
+This page is the catalog. The step-by-step walkthrough lives in
+[07-script-execution.md](07-script-execution.md) and
+[09-luau-vm-lifecycle.md](09-luau-vm-lifecycle.md).
 
-1. **Author** — `Script / LocalScript / ModuleScript / CoreScript` instances.
-   `init.{luau,legacy,server,client,plugin,local}.luau` names mark the
-   per-context bootstraps.
-2. **Gate** — `RunContext` (`Server/Client/Plugin/Legacy`), `Run{Client,Server}Script`
-   capabilities, `Security::Identity` + `VMClasses`. Rejections observed:
-   `Cannot start {client,server} script '%s' (lacking capability …)`,
-   `Can't resume script in this context`.
+## The ten stages
 
-The concrete start-admission predicate is at `ram:0x10142a7a6`. It reads the
-script's run-context field, obtains a native capability mask, and checks the
-relevant bit before allowing the start path to continue. The observed mapping
-is:
-
-* server-context admission requires the `RunServerScript` capability;
-* client-context admission requires the `RunClientScript` capability;
-* plugin/core/special contexts take additional native branches rather than
-  simply bypassing the check;
-* ancestry/container and DataModel state can still veto admission after the
-  capability bit is present.
-
-The small functions containing the `Cannot start ... lacking capability`
-strings are reporting helpers; `0x10142a7a6` is the function that computes the
-decision. The binary does not show Lua code assigning its own security level.
-
-The native capability vocabulary includes identities/classes such as `Plugin`,
-`LocalUser`, `WritePlayer`, `RobloxScript`, `RobloxEngine`, `Unassigned`,
-`InternalTest`, `PluginOrOpenCloud`, and `RemoteCommand`, plus capability
-groups such as `ServerCommunication`, `Social`, `Teleport`, `AssetRead`,
-`AssetManagement`, and `Logging`. These are policy categories used by native
-checks, not a Lua mechanism for arbitrarily elevating a running script.
-The identity is native execution-context metadata, while capabilities are the
-permission mask used to admit a script.
-3. **Wrap** — source becomes `ProtectedString`; never handled as raw `char*`
-   in facet signatures.
-4. **Load** — `LoaderFacet`: `addScript`, `requireModule`,
-   `loadModuleScriptFrom{Instance,AssetId,RbxLibraryPath}`,
-   `handleModuleScriptResult`, per-VM `ModuleScript::PerVMState`.
-   Strict rules: `Cannot require a (non-)RobloxScript module from a
-   (non-)RobloxScript (context)`.
-5. **Verify** — `Bytecode Auth Check missing or wrong version`,
-   `DebugDisableOptimizedBytecode`, `DebugSkipLoadAssetWithBytecodeVerification`.
-   The check sits at the compile→load boundary (see below).
-6. **Compile** — embedded Luau compiler (`LuauCompile*`, `BytecodeBuilder`,
-   `JitInliner::RuntimeBytecodeBuilder`, `SharedCodeGenContext`).
-7. **Schedule** — `ExecutorFacet::callInNewThread` / `callAsyncCallback`
-   pushes closures onto `lua_State`s from `VmCollectionFacet`'s pool.
-8. **Start and resume** — the inspected `LoaderFacet::addScript` execution
-   body is at `ram:0x10158ac46` (this address is a call-site/function body in
-   this build). It logs `Running script`, enforces a three-level
-   `startScript` re-entrancy limit, establishes a `Script Start` profiling
-   scope, obtains a VM/thread-facing object, and invokes the VM start helper.
-   The call keeps script/context shared ownership alive while callbacks and
-   result/error paths are installed. `SchedulerFacet::resumeWaitingScripts`
-   has two observed bodies at `ram:0x1015a8d94` and `ram:0x1015a9249`.
-   Both take an atomic resumption flag, drain a bounded number of waiting
-   entries, stop at a deadline, release each shared waiter, and finish with
-   scheduler bookkeeping. The second body has an additional context/queue
-   predicate and can remove an entry through `0x1015a837c`.
-   Yielding APIs suspend instead of blocking (`BoundYieldFuncDesc`,
-   `CallYieldHelper`, `YieldFunctionState`).
+1. **Write** — `Script`, `LocalScript`, `ModuleScript`, `CoreScript`.
+2. **Permission check** — `RunContext` (Server, Client, Plugin, Legacy),
+   `RunClientScript` / `RunServerScript` capabilities, security identity,
+   ancestry, DataModel state. Decided at `ram:0x10142a7a6`.
+3. **Wrap** — source travels as `ProtectedString`, not a raw `char*`.
+4. **Load** — `LoaderFacet`: `addScript`, `removeScript`, `requireModule`,
+   `loadModuleScriptFromInstance` / `FromAssetId` / `FromRbxLibraryPath`,
+   `handleModuleScriptResult`, `callAsyncCallbackFromSource`,
+   `reloadModuleScriptInternal`, per-VM `ModuleScript::PerVMState`.
+5. **Check** — bytecode authentication (`Bytecode Auth Check missing or
+   wrong version`), `Invalid Bytecode.`, `DebugDisableOptimizedBytecode`.
+6. **Compile** — embedded Luau compiler: `LuauCompile*`,
+   `BytecodeBuilder`, `JitInliner::RuntimeBytecodeBuilder`,
+   `SharedCodeGenContext`.
+7. **Schedule** — `ExecutorFacet::callInNewThread` and `callAsyncCallback`
+   place closures on threads from the VM pool.
+8. **Start and resume** — start at `ram:0x10158ac46` (at most three levels
+   of re-entrant start, `Script Start` region, VM handoff, shared
+   ownership across callbacks). Resume through `ram:0x1015566d6`
+   (pending-name log, shutdown deadline, C-stack limit of 200, timing).
+   Waiting drain at `ram:0x1015a8d94` / `ram:0x1015a9249` (one resume
+   flag, bounded drain, deadline, per-waiter release). Yielding calls
+   suspend through `BoundYieldFuncDesc`, `CallYieldHelper`,
+   `YieldFunctionState`.
 9. **Parallel** — `ParallelLuauWorkQueue::executePendingWork`,
-   `ParallelLuauHybridCaller::callInParallel` (errors if the VM lane is
-   inactive or the instance isn't queued). Actor rule, observed verbatim:
-   a `ModuleScript` may only use parallel APIs if required by an Actor
-   script (`BindToMessage{,Parallel}` enforce descendant-of-Actor).
+   `ParallelLuauHybridCaller::callInParallel`. A `ModuleScript` may use
+   parallel APIs only when required by an Actor script.
 10. **Collect** — `GcJob`, `ClearUnusedLuaRefsJob`,
-    `LuauHeapMemoryReport::{aggregate,collectInstances,linkHeap,runGc}`,
-     `ScriptScopeTokenPool` occupancy stats.
+    `LuauHeapMemoryReport`, `ScriptScopeTokenPool` stats.
 
-### Complete execution chain
+Shutdown reverses it: `disassociateState`, scheduler drain
+(`waitingThreads`, `YieldEvent->waiterCount`), VM release
+(`state thread count`).
 
-Putting the native paths together:
+## What level means
 
-```text
-Instance admission
-  → RunContext/capability/identity/container checks
-  → source ProtectedString or asset/bytecode lookup
-  → compilation-cache lookup or Luau compile
-  → bytecode authentication/load boundary
-  → ScriptContext execution record
-  → VM collection thread selection
-  → native resume/start helper
-  → Luau interpreter or native execution
-  → completion, error, or yield
-  → waiting queue + TaskScheduler
-  → later ScriptContextResume
-```
+Three different ideas share one confusing word:
 
-This is why `task.wait`, DataStore yields, async callbacks, and network-driven
-callbacks do not block an operating-system worker: they return from the VM
-with resumable state and are re-entered by the scheduler.
+1. **RunContext** — where the script is meant to run.
+2. **Security identity** — native context data carried with execution and
+   consulted by reflection and security checks.
+3. **Capabilities** — the native permission bits checked before the VM is
+   entered.
 
-Teardown reverses it: `LoaderFacet::disassociateState` → scheduler drain
-(`waitingThreads`, `YieldEvent->waiterCount`) → `VmCollectionFacet` free
-(`state thread count %zu`).
+Changing `RunContext` does not grant permission by itself. The native
+context must already hold the matching capability, and ancestry,
+container, and DataModel checks must also pass.
 
-The destructor bodies make that ordering concrete. The scheduler teardown at
-`ram:0x1015a7d1e` reports `YieldEvent->waiterCount`, releases the waiting
-thread claim/lock, reports `waitingThreads.size()`, and then destroys its
-queue/event/ownership members before poison-filling roughly `0x280` bytes.
-The VM collection teardown at `ram:0x1015bab74` walks multiple fixed-size VM
-slots, reports each state's thread count, releases per-slot resources and
-allocators, then poison-fills roughly `0x5e0` bytes. These are lifetime
-operations, not merely diagnostic logging.
+Policy words in this build include `Plugin`, `LocalUser`, `WritePlayer`,
+`RobloxScript`, `RobloxEngine`, `Unassigned`, `InternalTest`,
+`PluginOrOpenCloud`, `RemoteCommand`, and groups such as
+`ServerCommunication`, `Social`, `Teleport`, `AssetRead`,
+`AssetManagement`, and `Logging`.
 
-### Script-start pseudocode (simplified from the observed body)
+## Loading details
 
-```cpp
-void startScript(ScriptContext& context, ScriptRecord& script) {
-    if (++context.startDepth > 3)
-        fatal("startScript re-entrancy has exceeded 3");
+- `ram:0x101593650` is the compilation-cache boundary. It builds a
+  Luau-facing value, reads compact or out-of-line string storage, asks a
+  helper for cached or compiled data, and can fail with `Unexpected type
+  in script compilation cache.`
+- `ram:0x10159502e` is an early policy gate with `scriptClass` and
+  `script` diagnostics: `Script "{}" was blocked from being ran under a
+  restricted container.` and `detected as malicious. ... will not run.`
+- `ram:0x10158cc58` fills in the execution record: compact fields,
+  shared references, flags from script and context, inherited limits and
+  identity.
+- `loadstring` at `ram:0x1014c86c8` is policy-gated. It can answer
+  `loadstring() is not available` or `loadstring() is not available in
+  RobloxScript context.` When allowed, it still goes through the engine
+  compile and load helpers.
 
-    auto vmObject = context.prepareVmObject(script);
-    auto thread = context.createOrSelectThread(vmObject);
-    context.beginProfileRegion(thread, "Script Start");
-    context.installThreadState(thread, script);
-    int result = context.invokeLuauStart(thread, script);
-    if (result == 0)
-        context.publishYieldOrCompletion(thread);
-    else
-        context.publishScriptError(thread);
-    --context.startDepth;
-}
-```
+## Require
 
-The helper names and exact `lua_State` offsets remain unresolved; the
-important observed properties are the re-entrancy guard, VM/thread handoff,
-profiling scope, and ownership/error cleanup.
+`ram:0x10158dd88` is a stateful per-VM module cache:
 
-### What “script execution level” means here
-
-There are three related but different concepts:
-
-1. **RunContext** — where the script is intended to run: server, client,
-   plugin, or legacy.
-2. **Security identity** — native context metadata carried into the script
-   execution record and used by reflection/security checks.
-3. **Capabilities** — the native permission set, including
-   `RunClientScript` and `RunServerScript`, checked before the VM is entered.
-
-Changing a `RunContext` property does not itself grant permission. The native
-context must possess the corresponding capability, and the script must still
-pass DataModel/ancestry/container checks. This is why a script can be present
-in the correct service and still be refused before execution.
-
-### Additional native boundaries
-
-`ram:0x101593650` is a script compilation-cache/loader boundary, not the VM
-resume itself. It constructs a Luau-facing value, reads compact or
-out-of-line string storage, calls a helper supplying cached or compiled data,
-and has an explicit `Unexpected type in script compilation cache.` failure
-path. This places cache lookup between source/policy handling and execution.
-
-`ram:0x10159502e` is a native pre-run policy gate. It builds diagnostic data
-including `scriptClass` and `script`, and contains the messages `Script "{}"
-was blocked from being ran under a restricted container.` and `detected as
-malicious. ... will not run.` A script can therefore be rejected before the
-VM start path, rather than only failing inside Luau.
-
-`ram:0x10158cc58` initializes an execution record: it copies compact fields,
-retains shared references, derives execution flags from the script and current
-context, and stores inherited limits/identity data. The exact field meanings
-are not stable enough to publish as fixed offsets.
-
-The native `loadstring` bridge at `ram:0x1014c86c8` is policy-gated. It records
-the call as `loadstring`, checks the ScriptContext/security environment, and
-can reject the operation with `loadstring() is not available` or
-`loadstring() is not available in RobloxScript context`. When admitted, it
-passes source through the engine's compile/load helpers rather than directly
-creating an arbitrary untracked VM.
-
-### Native `require` behavior
-
-The body at `ram:0x10158dd88` is a real ModuleScript require path. Before
-loading it checks the caller/module security contexts and emits the observed
-errors for incompatible RobloxScript/non-RobloxScript combinations. It also
-handles special `.config` modules, attaches the module to the per-VM state,
-and branches on module state rather than blindly executing every call.
-
-The state handling includes:
-
-* already-loaded modules returning their cached result;
-* loading modules participating in a cycle, with a diagnostic requiring
-  `export` instead of `return` for circular dependencies;
-* destroyed module references failing with `Requested module has been
-  destroyed and can no longer be required`;
-* load failures producing `Requested module experienced an error while
+- incompatible RobloxScript combinations fail first;
+- `.config` modules cannot be required directly;
+- loaded modules return the cached value;
+- loading modules in a cycle produce the `export`-instead-of-`return`
+  diagnostic;
+- destroyed modules fail with `Requested module has been destroyed and can
+  no longer be required`;
+- load failures report `Requested module experienced an error while
   loading`;
-* successful modules being required to return exactly one value.
+- success must return exactly one value.
 
-This is a stateful per-VM module cache, not a simple filesystem-style
-`require(path)` operation.
+## Callbacks and coroutines
 
-### Async callbacks and coroutine state
+- `ram:0x101557e8c` resolves the implementing script through a weak
+  reference. Destroyed scripts fail with `Script that implemented this
+  callback has been destroyed while calling async callback.` Survivors get
+  a `callAsyncCallback` scope, rebuilt arguments, and the same VM path as
+  a start. All exits release shared references.
+- `ram:0x1015977c1` only accepts suspended / awaiting coroutines.
+  Anything else reports `ModuleScript cannot resume non-suspended
+  awaiting coroutine`.
 
-The callback body at `ram:0x101557e8c` resolves the implementing script from a
-weak reference before doing any VM work. If that script has been destroyed it
-raises `Script that implemented this callback has been destroyed while calling
-async callback`. Otherwise it creates a `callAsyncCallback` execution/profiling
-scope, rebuilds the callback's argument/context record, and routes the result
-through the same execution-object and VM-facing machinery used by script
-starts. Its normal, deferred, and error paths all release shared references.
-
-The small state gate at `ram:0x1015977c1` accepts only the VM states represented
-by suspended/awaiting coroutine states. Any other state produces
-`ModuleScript cannot resume non-suspended awaiting coroutine`; this prevents a
-second resume of a running or already-completed coroutine.
-
-### Waiting-script pseudocode
+Behavior in code form:
 
 ```cpp
-void resumeWaitingScripts(WaitingQueue& q, Deadline deadline) {
-    while (!q.tryClaimResumeFlag()) { /* bounded spin */ }
-    int budget = max(1, configuredWaitingScriptBudget());
-    while (budget-- > 0) {
-        auto waiter = q.popReady();
-        if (!waiter) break;
-        if (clock::now() >= deadline) break;
-        resumeOne(waiter);             // may remain/yield again
-    }
-    q.releaseResumeFlag();
-    schedulerBookkeeping(q, deadline);
+// Simplified illustration.
+void resumeWaiting(WaitingQueue& q, Deadline d) {
+  while (!q.tryClaim()) { /* bounded spin */ }
+  int budget = q.budget();
+  while (budget-- > 0) {
+    auto w = q.popReady();
+    if (!w) break;
+    if (now() >= d) break;
+    resumeOne(w);  // may yield again
+  }
+  q.release();
 }
 ```
 
-## The host: ScriptContext facets
-
-`RBX::ScriptContext` is a service in DataModel. Its facets, with observed
-operations:
+## ScriptContext facets
 
 | Facet / job | Operations |
 |---|---|
-| `LoaderFacet` | `addScript/removeScript`, `requireModule`, `loadModuleScriptFrom*`, `handleModuleScriptResult`, `callAsyncCallbackFromSource`, `reloadModuleScriptInternal` |
+| `LoaderFacet` | `addScript`, `removeScript`, `requireModule`, `loadModuleScriptFrom*`, `handleModuleScriptResult`, `callAsyncCallbackFromSource`, `reloadModuleScriptInternal` |
 | `SchedulerFacet` | `resumeWaitingScripts` |
 | `ExecutorFacet` | `callInNewThread`, `callAsyncCallback` |
-| `VmCollectionFacet` | VM-lane pool (`acquireVm/releaseVm` pattern) |
+| `VmCollectionFacet` | pooled VM lanes |
 | `CoverageFacet` | `getCoverageStats` |
-| `RomarkProfilerFacet` | profile-region annotations |
-| `GcJob`, `TelemetryJob`, `ClearUnusedLuaRefsJob`, `WaitingHybridScriptsJob`, `LuauHeapMemoryReportProcess`, `LuauRootObjectHeapProcess` | frame-scheduled maintenance |
+| `RomarkProfilerFacet` | profile regions |
+| Frame jobs | `WaitingHybridScriptsJob`, `GcJob`, `ClearUnusedLuaRefsJob`, `TelemetryJob`, `LuauHeapMemoryReportProcess` |
 
-## The Luau pipeline and its OSS counterparts
+## Luau stages and counterparts
 
-| Stage | In-binary markers | Luau OSS (`github.com/luau-lang/luau`) |
+| Stage | Markers in this build | Public Luau counterpart |
 |---|---|---|
-| Values | `TValue`-shaped slots, `LuauBuffer/Integer/CollectionHandle` | `VM/src/lobject.h`: `TValue`, `GCObject`, `TString`, `Table`, `Proto`, `Closure`, `UpVal` |
-| Parse | `AstExpr*/AstStat*` families | `Ast/.../Parser.h: parse` |
-| Compile | `LuauCompile*`, `BytecodeBuilder::emit*`, `JitInliner` | `Compiler.cpp: compile`, `BytecodeBuilder.h` |
-| Verify/load | auth-check strings above, `luau-telemetry.*` | `lvmload.cpp: luau_load → loadsafe`, `BytecodeEncoder::encode` hook |
-| Execute | `lua_State` in signatures, `lua_vm_init`, `lua_container_init` | `lvmexecute.cpp: luau_execute`, `ldo: luaD_call/pcall` |
-| Native tier | `LuauCodegen*`, `CodeGen::SharedCodeGenContext(+Deleter)`, `LuauNativeExecutionEvent` | `CodeGen.h: compile`, `NativeProtoExecData` |
-| Types | `LuauTypeCheckMode`, `LuauTypeSolver`, `LuauTypeInferIterationLimit`, `Luau-Reflection-Type-Error` | `Frontend/` type checker |
-| `require` | `Require::RuntimeNavigationContext`, navigator-shaped methods | `Require.h: luarequire_Configuration`, `RequireNavigator` (here backed by DataModel, not the filesystem) |
-| Coroutines | resume/yield strings above | `lua_newthread/resume/yield`, `CallInfo` |
-| GC | jobs + heap-report above | `lgc.h` tri-color, `lua_Page` heap |
+| Values | `TValue`-shaped slots, `LuauBuffer`, `LuauInteger`, `LuauCollectionHandle` | `lobject.h`: `TValue`, `GCObject`, `TString`, `Table`, `Proto`, `Closure`, `UpVal` |
+| Parse | `AstExpr*` / `AstStat*` families | parser |
+| Compile | `LuauCompile*`, `BytecodeBuilder`, `JitInliner` | compiler, `BytecodeBuilder.h` |
+| Check and load | bytecode authentication lines | `luau_load`, protected loader, encoder hook |
+| Run | `lua_State` in signatures | `luau_execute`, protected call helpers |
+| Native tier | `LuauCodegen*`, `SharedCodeGenContext`, native-execution events | code generator, native proto data |
+| Types | type-check mode, solver, iteration limits | frontend type checker |
+| `require` | navigator-shaped methods | `Require` configuration, backed here by DataModel |
+| Coroutines | resume and yield lines | `lua_newthread`, resume, yield, `CallInfo` |
+| GC | jobs and heap reports | tri-color collector, paged heap |
 
-No vanilla `luaL_*` surface and zero `getgenv` occurrences: the engine speaks
-to Luau through its own C++ API.
+There is no general `luaL_*` surface and no `getgenv` in this build. The
+engine talks to Luau through its own C++ layer.
 
-### Is `lua_pcall` present?
+## Protected calls
 
-The exact public symbol/name `lua_pcall` is not present in the shipped Mach-O
-symbol/string inventory. That does **not** mean protected calls were removed.
-The supplied Luau map resolves these exact function starts in this build:
+The public name `lua_pcall` is absent. The machinery is present:
 
-| Address | Finding |
+| Address | Role |
 |---|---|
-| `ram:0x10298b913` | `luaB_pcall`-shaped builtin wrapper; prepares the call frame, invokes the protected call machinery, and converts protected statuses/results |
-| `ram:0x10298b946` | `luaB_pcallrun`-shaped continuation/stack-result helper |
-| `ram:0x102995084` | `luaD_rawrunprotected`-shaped protected-execution boundary |
-| `ram:0x102995125` | `luaD_throw`-shaped exception path; throws a C++ exception in this build |
-| `ram:0x1029940f4` | `luaG_runerror`-shaped error construction/propagation path |
+| `ram:0x10298b913` | `luaB_pcall`: frame setup, protected call, status convert |
+| `ram:0x10298b946` | `luaB_pcallrun`: stack-result continuation |
+| `ram:0x102995084` | protected-execution boundary |
+| `ram:0x102995125` | throw path, via C++ exception in this build |
+| `ram:0x1029940f4` | error build and propagate |
 
-So the accurate statement is: **the exported/public `lua_pcall` API name is
-stripped or not used, while the implementation's protected-call machinery and
-the Luau `pcall` builtin remain present.** Roblox's native ScriptContext paths
-also use their own protected VM helpers rather than requiring a public
-`lua_pcall` symbol.
+ScriptContext paths use their own protected helpers as well.
 
-### Split RIP-pointer construction in selected Luau paths
+## Split string pointers
 
-The MacPlayer also contains the selective pointer construction described in
-the accompanying offset research. A verified example is at
-`ram:0x102988254`, inside a Luau error path:
+Some Luau error paths do not reference their string directly. At
+`ram:0x102988254`:
 
 ```asm
-lea    rax, [rip+...]          ; dummy = 0x106c9c778
+lea    rax, [rip+...]           ; dummy = 0x106c9c778
 mov    [rbp-0x18], rax
-mov    rsi, 0xffffffffffd06c00 ; signed delta = -0x2f9400
-add    rsi, [rbp-0x18]         ; rsi = 0x1069a3378, "stack limit"
-call   ram:0x1029940f4         ; luaG_runerror-shaped path
+mov    rsi, 0xffffffffffd06c00  ; delta = -0x2f9400
+add    rsi, [rbp-0x18]          ; rsi = 0x1069a3378, "stack limit"
+call   ram:0x1029940f4
 ```
-
-The dummy address is in `__unwind_info`; the reconstructed pointer lands in
-`__cstring`. The arithmetic is:
 
 ```text
 0x106c9c778 + (-0x2f9400) = 0x1069a3378
 ```
 
-This is distinct from ordinary compiler output such as `lea rsi,[rip+string]`.
-It can break naive string-reference scanners because the instruction that
-mentions the real string address is replaced by an immediate delta and a
-stack-mediated add. The pattern is selective: direct RIP-relative references
-still exist elsewhere, including ordinary Luau/engine strings, so it should be
-treated as a deliberate per-site pointer transformation rather than a global
-compiler ABI rule.
+The dummy sits in `__unwind_info`. The result lands in `__cstring`. This
+is selective. Ordinary direct string references still exist elsewhere.
 
-## Luau-side findings from the supplied function map
+## Luau function starts in this build
 
-The supplied RVAs were checked against the binary's linker function-start
-table. These entries land exactly on function starts for this build:
-
-| Supplied RVA | Verified role |
+| Offset | Role |
 |---|---|
-| `0x299fd5b` | `lua_newstate`-shaped state allocation/initialization; accepts an allocator callback and allocator context, initializes the state, then runs protected initialization |
-| `0x29a9f36` | `loadsafe`-shaped protected bytecode load; checks stack/memory state, calls the protected loader, restores the stack cursor, and reports memory failure |
-| `0x29adfd3` | `luau_execute` entry exists at the exact address, but this build's decompiler could not recover its body; do not infer its calling convention from the label alone |
-| `0x15566d6` | `ScriptContextResume`; logs `Resuming script`, checks shutdown/deadline and C-stack limits, then performs the VM resume path |
-| `0x14cf74a` | `task.wait`; rejects non-yieldable threads and AuroraScript contexts, marks the coroutine waiting, schedules a timed resume, and returns through the VM resume machinery |
-| `0x55d5e74` | ScriptContext facet accessor: if the facet index is below 3 it returns `context+0xdc0`; otherwise it raises `Invalid Facet Access` |
+| `0x299fd5b` | state create and init: allocator callback and context, then protected init |
+| `0x29a9f36` | protected bytecode load: stack and memory checks, load, cursor restore |
+| `0x29adfd3` | `luau_execute` entry; body is highly optimized and not detailed here |
+| `0x15566d6` | resume: pending-name log, shutdown and C-stack checks, VM re-entry |
+| `0x14cf74a` | `task.wait`: yieldable-thread check, mark waiting, timed resume |
+| `0x55d5e74` | facet accessor: index below 3 returns `context+0xdc0`, else `Invalid Facet Access` |
 
-The `ScriptContextResume` body exposes several real VM guardrails:
+Resume guards: pending-name log, C-stack depth above 200 becomes `C
+stack overflow`, past-deadline shutdown refuses to run, execution
+metadata can refresh from DataModel and context, first-resume and run
+time are recorded.
 
-* It logs the pending script name before resume.
-* It rejects a C stack depth above 200 with `C stack overflow`.
-* It refuses to run after the shutdown deadline.
-* It can refresh execution metadata from the DataModel/context before resume.
-* It records first-resume timing and script execution time.
+`task.wait` never sleeps a worker. It marks the coroutine waiting,
+packages a wake deadline, queues the resume, and returns to the VM.
 
-`task.wait` is not implemented as a blocking OS sleep. Its body marks the
-current coroutine as waiting, packages a resume event/deadline, schedules it
-through ScriptContext's waiting machinery, and returns control to the VM. This
-is the native reason a Luau `task.wait()` yields without blocking the worker
-thread.
+State creation runs through `ram:0x1015b92cd`: allocator and context,
+`lua_newstate` for `0x4d60` bytes, failure becomes `Failed to create Lua
+state`, then hooks, libraries, Roblox bindings, `_G`, sandbox and config,
+and the VM collection takes ownership. States belong to the collection.
+Scripts borrow threads.
 
-### Lua state creation in this player
+A label such as `GetGlobalState = 0x55d5e74` is better read as a facet
+accessor here. `task.spawn = 0x14cff67` lands in a small task-library
+helper whose public wrapper still needs a caller trace. Labels are an
+index, not a stable interface.
 
-The exact caller of `lua_newstate` is `ram:0x1015b92cd`. Its sequence is
-visible in the body:
+## Native to Lua events
 
-```text
-allocator callback + allocator context
-  → lua_newstate (allocates a 0x4d60-byte state)
-  → fail hard if state creation returns null
-  → attach allocator/configuration data to a ScriptContext VM wrapper
-  → install panic/interrupt/error callbacks
-  → initialize Luau/standard library entry points
-  → register Roblox-specific libraries and globals
-  → establish _G and sandbox/configuration handlers
-  → retain the wrapper in the VM collection
-```
+- `notifyLuaFocusedIfNeeded` (`ram:0x10000cdd2`): builds
+  `AppInput` / `""` / `"Focused"` (`0x100016179`, 0x58 bytes), fires via
+  `0x102ec8158` / `0x102ec81a0`.
+- `didReceiveScriptMessage` (`ram:0x10000e295`): message body to UTF-8 to
+  engine string (SSO assign, `0x102d49d80`), lookup and dispatch
+  (`0x104929a60`, `0x104f2965c`, global `0x10003ddee`), then
+  `0x10520f486`.
 
-The state initializer at `ram:0x10299fd5b` accepts a function pointer and
-context, calls that allocator for `0x4d60` bytes, initializes the global-state
-and main-thread pointers, stack/GC fields, and runs a protected initialization
-routine. The caller immediately reports `Failed to create Lua state` if it
-returns null.
+## C++ companions
 
-The caller then installs callbacks and invokes a long series of library
-registration functions. The names in the offset header map to several of the
-same routines (`luaopen_math`, `luaopen_os`, `luaopen_base`, and others), but
-the engine does not simply expose an unrestricted stock Lua environment: the
-library set, globals, Roblox bindings, sandbox configuration, identity, and
-capabilities are applied around the VM before scripts run.
-
-The VM is therefore not created per individual script. A ScriptContext owns a
-VM collection; scripts obtain execution threads/stacks from that collection,
-and `task.wait`/resume operate on those threads. Teardown releases the VM
-collection only after waiting scripts and yield waiters have been drained.
-
-### Correct interpretation of the offset header
-
-The header is a useful symbol/offset index, but its names are analyst labels,
-not proof of wrapper semantics. In particular:
-
-* `GetGlobalState = 0x55d5e74` should be renamed to something like
-  `ScriptContextFacetAccessor` for this binary.
-* `task.wait = 0x14cf74a` is behaviorally confirmed.
-* `task.spawn = 0x14cff67` currently lands in a small task-library setup/helper
-  body; its exact public wrapper relationship still needs a caller trace.
-* `luau_execute` is an exact function start, but its calling convention/body
-  is unresolved because the decompiler failed on that highly optimized VM
-  routine.
-
-This distinction matters when reconstructing a legitimate in-process engine:
-use public Luau APIs and engine-owned ScriptContext interfaces for execution;
-do not treat a label in an offset header as a stable ABI or as permission to
-inject into or bypass another process.
-
-## Native → Lua event paths (observed bodies)
-
-* `EmbeddedWebView.notifyLuaFocusedIfNeeded` (`ram:0x10000cdd2`): builds
-  `AppInput/""/"Focused"` (`0x100016179`, 0x58 bytes) → fires via
-  `0x102ec8158/0x102ec81a0`. Telling Lua = engine event dispatch.
-* `EmbeddedWebView userContentController:didReceiveScriptMessage:`
-  (`ram:0x10000e295`): `WKScriptMessage.body` → `UTF8String` → libc++ string
-  (SSO assign, `0x102d49d80`) → engine lookup + dispatch (`0x104929a60`,
-  `0x104f2965c`, seqlock global `0x10003ddee`) → `0x10520f486`.
-
-## C++ material
-
-* `include/rbx/script_context.hpp` — `ScriptContext : Service` with concrete
-  facet interfaces (`ProtectedString`, `SecurityIdentity`, per-VM state).
-* `include/rbx/luau_bridge.hpp` — pooled `lua_State` lanes, verified
-  compile→load boundary with the auth hook, `require` navigator shape.
-* `src/luau_embed_demo.cpp` — `luau_compile` → auth → `luau_load` →
-  `lua_resume` against real Luau headers (`make LUAU_INCLUDE=… luau_demo`).
+- `include/rbx/script_context.hpp`: facets, `ProtectedString`,
+  `SecurityIdentity`, per-VM module state.
+- `include/rbx/luau_bridge.hpp`: pooled lanes, check-then-load boundary,
+  `require` navigator shape.
+- `src/luau_embed_demo.cpp`: `luau_compile`, check, `luau_load`,
+  `lua_resume` against real Luau headers.

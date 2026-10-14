@@ -37,7 +37,7 @@ ring, unlock, wake a worker, manage lifetimes.
 | size | `0xf7` bytes, 71 instructions |
 | locks | `+0x778` mutex (`0x10320983c` lock / `0x103209848` unlock) |
 | queues | array at `+0x780`, stride `0x10` per index |
-| confidence | high (full asm + prior pseudocode) |
+| covered here | lock, shard select, copy, insert, wake, release |
 
 **Step by step (read against the assembly below)**
 
