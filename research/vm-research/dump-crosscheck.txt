@@ -1,0 +1,78 @@
+# Cross-check: "Pibbly" dumped offsets header vs. this binary
+# Binary: RobloxPlayer (macOS) v0.742.0.7421053, image base 0x100000000
+# Dump uses file offsets (VA - 0x100000000). Status verified via Ghidra.
+#
+# legend: OK = address+label verified | BAD-LABEL = address is a real func but label wrong
+#         OFF = address numerically wrong | MIDFUNC = internal label, not a function entry
+
+# ---- Luau (corrected) ----
+# dump label                 dump VA      status     note
+OpcodeLookupTable           0x63bb680    OFF        real T table = 0x63bb686 (off by 6)
+LuaVMLoad                   0x29a9f36    OK
+loadsafe (luau_load)        0x29aa05a    OK
+luau_execute                0x29adfd3    OK
+luaD_rawrunprotected        0x2995084    OK
+luaD_throw                  0x2995125    OK
+lua_eception (exception)    0x2995162    OK
+lua_yield                   0x2992a58    OK
+lua_newstate                0x299fd5b    OK
+lua_resetthread             0x299fb71    OK
+lua_rawcheckstack           0x2995b7f    BAD-LABEL actually resume-prologue/nCcalls guard (FUN_102995b7f)
+luaC_step                   0x2996c06    OK
+luaF_newproto               0x29964dd    OK
+luaF_newLclosure            0x29965b9    OK
+luaF_newUpval               0x29967b1    OK
+luaG_runerror               0x29940f4    OK
+luaH_new                    0x29a4b19    OK
+luaH_clone                  0x29a63f4    OK
+luaH_dummynode              0x63bb640    OK (data)
+luaO_nilobject              0x63bb4e0    OK (data)
+luaO_str2d                  0x299ed30    OK
+luaO_chunkid                0x299f01f    OK
+luaV_gettable               0x29abe86    OK
+luaV_settable               0x29ac376    OK
+luaV_equal                  0x299ebe4    OK
+luaV_lessthan               0x29ac854    OK
+luaT_init                   0x29a8980    OK
+luaT_objtypename            0x29a8ba8    OK
+luaA_toobject               0x2989f71    OK
+lua_namecallatom            0x2986555    OK
+lua_encodepointer           0x298943b    OK
+lua_pushfstringL            0x2986e1a    OK
+lua_pushvfstring            0x2986dbe    OK
+luaopen_base                0x298b6dc    OK
+luaopen_math                0x299c17a    OK
+luaopen_os                  0x299f10b    OK
+
+# ---- Memory (all OK) ----
+luaM_toobig                 0x299d362    OK
+newblock                    0x299d387    OK
+luaM_freearray              0x299db1c    OK
+luaM_freegco                0x299dc0d    OK
+luaM_visitgco               0x299e404    OK
+newclasspage                0x299e443    OK
+luaM_newgco                 0x299d62a    OK
+newgcoblock                 0x299d69c    MIDFUNC inside luaM_newgco (entry 0x299d62a)
+newpage                     0x299d77a    OK
+
+# ---- Task ----
+synchronize                 0x14cedfe    OK
+desynchronize               0x14ceec6    OK
+defer                       0x14cef92    OK
+task_lib_init               0x14cebe0    OK
+spawn                       0x14cff67    OFF        real task.spawn  = 0x14cf416
+delay                       0x14cf880    OFF        real task.delay  = 0x14cf56a (dump reused cancel addr)
+wait                        0x14cf74a    OK
+cancel                      0x14cf880    OK
+
+# ---- Roblox (all OK) ----
+ConnectionDisconnect        0x14a9cd4    OK
+PushInstance                0x1487d49    OK
+GetGlobalState              0x55d5e74    OK
+ScriptContextResume         0x15566d6    OK
+
+# ---- Summary of required corrections ----
+# 1. OpcodeLookupTable: 0x63bb680 -> 0x63bb686
+# 2. task.spawn:        0x14cff67 -> 0x14cf416
+# 3. task.delay:        0x14cf880 -> 0x14cf56a
+# 4. lua_rawcheckstack label is wrong (0x2995b7f is the resume nCcalls guard)

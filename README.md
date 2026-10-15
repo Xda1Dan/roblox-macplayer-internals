@@ -62,6 +62,10 @@ Suggested reading order:
 11. [Addresses and limits](docs/evidence-ledger.md) — where each address
     lives and what is still unknown.
 
+The raw working notes behind these write-ups — the offset reference, structure layouts, the
+early report, and the per-symbol dump cross-check — are in
+[`research/`](research/README.md). They are versioned here but not published on the site.
+
 Each walkthrough and reference page follows the same shape:
 
 ```text
