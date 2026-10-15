@@ -20,7 +20,8 @@ SHA-256 `ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47`.
 | Singletons, session accessor, guards | Bodies at the cited addresses |
 | Service roster, facet and method names, Luau markers, log lines | String table (883k entries), 761 log channels |
 | Hidden engine symbols | Shipped symtab: 2275 entries, no Lua, DataModel, or net code symbols; mostly standard-library type names |
-| Luau VM mapping | Public Luau source as a reference, not a binary fact |
+| Opcode numbering, pointer encodings, VM object layouts | Binary tables `0x1063bb686` / `0x10648bb74` and the accessor code (`0x102996918`, `0x102993f3c`) - see the Luau VM encodings page |
+| Deep Luau pillar semantics (GC, full interpreter bodies) | Public Luau source as a reference, not a binary fact |
 | Service membership | Binary names plus public Roblox API docs, labeled where used |
 
 ## Limits
@@ -35,7 +36,9 @@ These are unknowns, not oversights:
 - Struct offsets such as `+0x778` belong to this build only and move
   between versions.
 - `luau_execute` (`0x29adfd3`) is a dispatch stub (singlestep check plus
-  opcode jump table); the interpreter loop bodies behind `0x1072d9230`
-  are not detailed here.
+  opcode jump table). The 93 slots, the `wire -> vmop` permutation, and the
+  per-slot handler addresses are mapped in
+  [Luau VM encodings](11-luau-vm-encodings.md); the individual opcode
+  bodies are not summarized here.
 - Exact wire formats, helper names behind internal calls, and per-build
   tunable values are not claimed.

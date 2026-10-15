@@ -191,14 +191,19 @@ Both hold exactly 93 non-zero slots with bit-identical occupancy masks
 but different handler addresses — one handler copy per loop, back to
 back in `__text` (combined span `0x1029ae03e–0x1029b8b9f`).
 
-The striking part: stock Luau has exactly 93 opcodes (`LOP_NOP` = 0 …
-`LOP_FINCONSTRUCT` = 92), yet the non-zero slots scatter across indices
-0–255 (slot 0 empty, slot 2 empty, slots 32–39 all empty, and so on).
-The table does **not** follow stock `LOP_*` order — the opcode byte
-values in this build's bytecode are shuffled relative to public Luau.
-That count match (93 slots = 93 opcodes) is observed; the shuffle itself
-is the natural reading, and it means stock-Luau bytecode will not execute
-here even where the VM logic is identical.
+Stock Luau has exactly 93 opcodes (`LOP_NOP` = 0 … `LOP_FINCONSTRUCT` =
+92), yet the non-zero slots scatter across indices 0–255 (slot 0 empty,
+slot 2 empty, slots 32–39 all empty, and so on). The table does **not**
+follow stock `LOP_*` order.
+
+The permutation is exact, not approximate. The byte on disk is `wire =
+(227 * canonical) & 0xFF`, and the byte the interpreter dispatches on is
+`T[wire]`, for the 256-byte table `T` at `0x1063bb686`; the binary ships
+the inverse too (`R` at `0x10648bb74`, with `R[T[wire]] == canonical`).
+All 93 slots were resolved by this round trip and cross-checked against
+their handler bodies. The full table and the arithmetic live in
+[Luau VM encodings](11-luau-vm-encodings.md). Stock-Luau bytecode still
+will not execute here even where the VM logic is identical.
 
 ---
 
@@ -252,143 +257,40 @@ call   0x1029940f4          ; luaG_runerror-shaped
 Selective hardening, not a universal compiler rule: direct RIP-relative
 string references still exist elsewhere.
 
-### Shuffle proven: six handlers identified by behavior
+### Slots identified
 
-Table slots were identified by what their handler bodies do, checked
-against Luau source semantics (tag constants match source exactly:
-`3` = number, `5` = vector, `8` = function, `9` = userdata):
+Every slot is resolved by the derived numbering above (the round trip is
+93/93 against the binary's own `T` / `R` tables), not by sampling. Handler
+bodies were used to confirm the hard cases against source semantics rather
+than to name the rest:
 
-| Table slot | Handler | Behavior | Stock slot |
-|---|---|---|---|
-| 1 | `0x1029b3d0d` | moves argument TValues to the new top, nils the old slots, grows the stack — function-entry argument shuffle (PREPVARARGS-shaped) | 65 |
-| 3 | `0x1029b4ed7` | number plus constant-table number, slow-path fallback — ADDK (second operand addressed off the constant base, not the stack) | 39 |
-| 9 | `0x1029b52ab` | patches the loop-counter field of its own instruction — FOR-loop prep | 56 |
-| 12 | `0x1029b5485` | constant-exponent `x*x`, `sqrt(x)`, `x*x*x` fast paths, `_pow()` fallback — POWK | 44 |
-| 14 | `0x1029b7909` | number divided by constant-table number, vector path, userdata-metatable fallback with tag-method `0xb` (DIV) — DIVK | 42 |
-| 16 | `0x1029b58bf` | plain `_pow()` on two stack numbers — POW | 38 |
-| 17 | `0x1029b5934` | number/number or string/string less-than, skip-on-false — JUMPIFLT | 29 |
-| 18 | `0x1029b5863` | number register vs constant-table number compare, conditional skip with flag bit — JUMPXEQKN family | 79 |
-| 20 | `0x1029b79a5` | number×number, vector paths, userdata-metatable fallback, slow path — MUL | 35 |
-| 22 | `0x1029b361a` | function-tag check plus inline-cache compare before dispatch — call-path probe trampoline; exact role medium-low | — |
-| 25 | `0x1029b5735` | `a - round(a/b)*b` on stack numbers — MOD | 37 |
-| 28 | `0x1029b786d` | `floor(a/b)` on stack-over-constant numbers, vector paths, tag-method `0xc` (IDIV) fallback — IDIVK | 82 |
-| 40 | `0x1029b367b` | two-word instruction with AUX feedback slot, seal-then-helper sequence — CALLFB | 87 |
-| 46 | `0x1029b55c5` | safeenv + table + nil triple check, iterator setup — FORGPREP_NEXT | 61 |
-| 52 | `0x1029b4105` | 3 instructions: advance one word, zero state change — no-op family (NOP/BREAK indistinguishable in production) | 0 |
-| 55 | `0x1029b5607` | truthy test, truthy selects constant operand — ANDK | 47 |
-| 56 | `0x1029b551d` | table and string fast paths, `__len` fallback, number result — LENGTH | 52 |
-| 57 | `0x1029b598e` | hash/array sizes, table allocate, GC check — NEWTABLE | 53 |
-| 58 | `0x1029b39cd` | string-keyed global lookup with cache check and slow-path patch — GETGLOBAL | 7 |
-| 61 | `0x1029b56bf` | table + number + exactly-0.0 checks, iterator setup — FORGPREP_INEXT | 59 |
-| 63 | `0x1029b54e1` | jump iff truthy (nil/false fall through) — JUMPIF | 25 |
-| 65 | `0x1029b57a3` | register-register equality, tag-switched, no-jump-on-mismatch — JUMPIFEQ | 27 |
-| 66 | `0x1029b5a1b` | unconditional constant-to-register copy across two instruction words — LOADKX | 66 |
-| 69 | `0x1029b5688` | 4-instruction unconditional 16-bit jump, no interrupt check — JUMP | 23 |
-| 71 | `0x1029b563b` | register truthy wins, else constant operand — ORK (pairs with slot 55 ANDK; slot 111 OR below confirms the plain shape) | 48 |
-| 74 | `0x1029b6653` | value register stored into cached node slot with write barrier and patch-C — SETTABLEKS (operand roles match source: value from A, key from AUX) | 16 |
-| 78 | `0x1029b3a82` | two stack args copied, builtin-ID dispatch with 3-arg shape — FASTCALL3-leaning | 60 |
-| 79 | `0x1029b3b7c` | object gate, skip-to-CALL decode, stack-to-frame copy, vectorized nil-fill of the result tail — FINCONSTRUCT | 92 |
-| 80 | `0x1029b66fb` | nil-or-false test, skip-or-fall-through — JUMPIFNOT | 26 |
-| 83 | `0x1029b6314` | number negate (sign-flip via per-build masks), tag-method `0xf` (UNM) fallback — MINUS | 51 |
-| 85 | `0x1029b3daf` | no pc advance, debugbreak-hook check, re-dispatch on the real opcode — BREAK | 1 |
-| 86 | `0x1029b6386` | array-bounds-checked indexed store with barrier, `C+1` key, slow `settable` — SETTABLEN | 18 |
-| 87 | `0x1029b3e2b` | two-word, MULTRET count handling, array grow, bulk copy with barrier — SETLIST | 55 |
-| 88 | `0x1029b3f18` | userdata-tag check, direct-access table, cached-slot patch, miss rewrites to slow path — SETUDATAKS | 84 |
-| 92 | `0x1029b3f8d` | two-word cached import with safeenv check, generic fallback — GETIMPORT | 12 |
-| 106 | `0x1029b7ae6` | all-stack operands, `DIVSD`/`DIVPS` fast paths, tag-method `0xb` (DIV) fallback — DIV | 36 |
-| 107 | `0x1029b5583` | writes nil tag to the destination slot, single-word — LOADNIL | 2 |
-| 109 | `0x1029b6275` | upvalue-table source with closed-over dereference, 16-byte copy — GETUPVAL | 9 |
-| 111 | `0x1029b67ec` | falsy first operand wins, else second (inverse of ANDK) — OR | 46 |
-| 112 | `0x1029b692e` | triple number-tag check, step/limit/index setup, conditional first jump — FORNPREP | 56 |
-| 114 | `0x1029b644a` | number and string less-or-equal fast paths, generic fallback, skip-on-true — JUMPIFLE | 28 |
-| 115 | `0x1029b8231` | cached-closure reuse with capture loop (value/upvalue only, no by-ref) — DUPCLOSURE | 64 |
-| 116 | `0x1029b4014` | builtin-ID dispatch via `0x1072d74e0` with frame args — FASTCALL family | 68-ish |
-| 117 | `0x1029b69b7` | interrupt hook + GC step, then numeric step/limit/exit — FORNLOOP | 57 |
-| 118 | `0x1029b8b9f` | 2 bytes: trap only — permanently invalid slot, not an opcode | — |
-| 120 | `0x1029b411c` | method resolution with DIRECT per-type invocation and result — matches no stock opcode cleanly (stock NAMECALL never invokes inside its handler); leading hypothesis is an engine-custom method-call opcode | — |
-| 125 | `0x1029b45da` | builtin-ID dispatch with constant-table args and arg-count 2 — FASTCALL2K-leaning | 75 |
-| 127 | `0x1029b46b0` | per-tag (`global+0x960`, `0x48` stride) userdata method call with argument marshaling — NAMECALLUDATA | 85 |
-| 140 | `0x1029b5599` | writes the signed 16-bit literal as a number — LOADN | 4 |
-| 141 | `0x1029b48d3` | const-key lookup with method/self setup and invocation machinery (full userdata and metatable paths) — NAMECALL | 20 |
-| 142 | `0x1029b64a0` | function/table/userdata dispatch with TM_ITER/TM_CALL metatable lookup, unconditional first jump — FORGPREP | 76 |
-| 144 | `0x1029b5d80` | register-to-upvalue copy with write barrier — SETUPVAL | 10 |
-| 145 | `0x1029b5d3c` | constant-minus-register doubles — SUBRK | 71 |
-| 147 | `0x1029b64a0` | MULTRET bulk copy or bounded copy with nil fill — GETVARARGS | 63 |
-| 149 | `0x1029b4942` | reads the paired CALL word, builtin call, skips past CALL on success — FASTCALL (matches source including the CALL pairing, which is its unique signature) | 68 |
-| 150 | `0x1029b6784` | pure 16-bit jump plus safepoint call — JUMPBACK | 24 |
-| 151 | `0x1029b6a71` | two stack-sourced args, CALL-word pairing — FASTCALL2 | 74 |
-| 152 | `0x1029b6b82` | jump unless less-than (NaN jumps; strings by inverted compare) — JUMPIFNOTLT | 32 |
-| 157 | `0x1029b6ae9` | class tag `0xc`, open/closed flag, superclass inherit — NEWCLASS | 90 |
-| 158 | `0x1029b682c` | constant divisor, `a-floor(a/b)*b` — MODK | 43 |
-| 159 | `0x1029b6c2a` | register-held integer index with exactness guards, array fast path, `gettable` slow path — GETTABLE (matches the stock numeric-key path) | 13 |
-| 160 | `0x1029b5a48` | unconditional 16-byte register copy — MOVE | 6 |
-| 163 | `0x1029b635b` | writes boolean value and tag with skip — LOADB | 3 |
-| 164 | `0x1029b5de3` | immediate-index array fast path (`index < size`, no metatable), `index+1` slow path via `gettable` — GETTABLEN, matches source line-for-line | 17 |
-| 168 | `0x1029b68a9` | table clone helper plus GC step — DUPTABLE | 54 |
-| 176 | `0x1029b8a33` | native-flag write, saved-pc reset, native-enter gate with reentry — NATIVECALL | 62 |
-| 179 | `0x1029b6d12` | string register vs constant-string compare with NOT flag — JUMPXEQKS | 80 |
-| 183 | `0x1029b6150` | array- and hash-part traversal with index/value writeback, loop-back vs fallthrough exits — FORGLOOP | 58 |
-| 185 | `0x1029b605b` | unconditional wide jump from the instruction word, no state change — JUMPX | 67 |
-| 186 | `0x1029b4a5f` | string hash probe with predicted slot, full `__index`/metatable/userdata/object fallbacks funneled into `gettable` — GETTABLEKS | 15 |
-| 190 | `0x1029b88f9` | interrupt prologue, MULTRET limit, frame pop, native-reentry block — RETURN (opposite copy direction and frame pop rule out the GETVARARGS-duplicate theory) | 22 |
-| 198 | `0x1029b60fa` | reversed-strict less-than across number, string, and metamethod paths — JUMPIFNOTLE | 31 |
-| 201 | `0x1029b6cca` | truthiness test, truthy selects second register — AND | 45 |
-| 204 | `0x1029b60be` | single constant-to-register copy, no AUX — LOADK | 5 |
-| 206 | `0x1029b60be` | boolean register vs constant compare with NOT flag — JUMPXEQKB | 78 |
-| 207 | `0x1029b4f33` | MULTRET handling, CallInfo alloc, Lua/C closure split — CALL | 21 |
-| 209 | `0x1029b5fc8` | constant-divided-by-register doubles — DIVRK | 72 |
-| 210 | `0x1029b600e` | nil/false/else to boolean, no jump — NOT | 50 |
-| 216 | `0x1029b5e8c` | tag-dispatch table, inverted sense of JUMPIFEQ — JUMPIFNOTEQ | 30 |
-| 219 | `0x1029b5abe` | open-upvalue null check plus range compare guarding a close call, single-word fallthrough — CLOSEUPVALS | 11 |
-| 220 | `0x1029b79fb` | constant-times-register with tag-method `0xa` (MUL) fallback — MULK | 41 |
-| 222 | `0x1029b7b3c` | number and vector add fast paths, tag-method `0x8` (ADD) fallback — ADD | 33 |
-| 227 | `0x1029b5216` | single stack-arg builtin call — FASTCALL1-leaning | 73 |
-| 231 | `0x1029b6bdc` | class/member-name/value triple into a class-member helper, straight-line two-word — NEWCLASSMEMBER | 86 |
-| 235 | `0x1029b6731` | register-minus-constant doubles — SUBK | 40 |
-| 236 | `0x1029b5d10` | AUX-key hashed store with predicted slot, patch-C, `__newindex` path — SETTABLEKS (second slot with this shape alongside slot 74; see notes) | 16 |
-| 238 | `0x1029b5f46` | nil-test with sign flag — JUMPXEQKNIL | 77 |
-| 240 | `0x1029b5e8c` | multi-value concat with barrier check — CONCAT | 49 |
-| 246 | `0x1029b5c54` | register-held integer index with exactness guards, array store with barrier, `settable` slow path — SETTABLE (matches the stock array-assign fast path including the readonly check) | 14 |
-| 247 | `0x1029b5e4e` | class construction via helper, object/table result — CONSTRUCT | 91 |
-| 251 | `0x1029b7a9e` | all-stack operands, number and vector subtract — SUB | 34 |
-| 253 | `0x1029b7820` | floor-division with vector path and distinct slow helper — IDIV | 81 |
-| 255 | `0x1029b5af8` | closure allocate plus value/upvalue/by-ref capture loop — NEWCLOSURE | 19 |
+- `COVERAGE` (vmop 9, `0x1029b52ab`) increments bits 8..30 of its own
+  instruction word, saturating at `0x7fffff` — the stock coverage counter,
+  which reads like a loop-prep patch but is not.
+- `CMPPROTO` (vmop 22, `0x1029b361a`) requires a function register, reads
+  the Lua closure's `Proto`, compares `Proto.funid` (`+0xBC`) to the AUX
+  word, and skips on mismatch.
+- `GETUDATAKS` (vmop 141, `0x1029b48d3`) falls back by rewriting its own
+  opcode byte to `0x78` (120 = `GETTABLEKS`) and jumping into that handler.
+- `NAMECALL` (vmop 186, `0x1029b4a5f`) writes `R(A+1) = R(B)`, then
+  `R(A) = R(B)[K(AUX)]`; `GETTABLEKS` (vmop 120, `0x1029b411c`) writes only
+  `R(A)`.
 
-Every identified slot differs from its stock position, so the shuffle is
-established by behavior, not just by table sparsity. Slot↔handler
-assignments are verified by reading the table back directly, which caught
-one mislabeled batch before publication. All handlers end by jumping back
-to the central dispatch (`0x1029b3618` / `0x1029b360d` region), confirming
-the single-loop structure.
-
-Two FASTCALL tables are present and their roles are now clearer. Luau source
-has a `luauF_table[256]` of typed fast functions (`assert`, math functions,
-bit functions, and so on). The table at `0x1072d74e0` has entries pointing
-into the Luau builtin code region (`0x10298...`), matching that fast-function
-role. The table at `0x1072d7ce0` is mixed: code pointers are interleaved with
-non-code values, so it is not the same direct function table; it is likely a
-separate builtin/name/dispatch structure used by another FASTCALL path.
-
-The remaining shape question is which Roblox builtin IDs populate each table
-at every index. The opcode conclusions do not depend on that unresolved
-index-to-name mapping.
-
-A duplicate-slot question is open on stores: slots 74 and 236 are both
-store-shaped with patch-C (the former smaller with a method-vector
-cache, the latter with full `__newindex` machinery). Either the table
-duplicates SETTABLEKS or one slot is a variant the source doesn't
-separate. Both rows say so explicitly.
+Store opcodes are not duplicated: `SETGLOBAL` (vmop 74, `0x1029b6653`)
+takes its value from `A` and its key from `AUX` against the environment,
+and never reads the `B` register, while `SETTABLEKS` (vmop 236,
+`0x1029b5301`) reads `B` as the table. They are two opcodes, not one
+twice. The opcode byte values, the two loops' separate handler copies, and
+the parity between them are tabulated in
+[Luau VM encodings](11-luau-vm-encodings.md).
 
 ## Unknowns
 
 - Exact helper names behind VM start / resume calls.
-- Stock opcodes with no slot found yet: SETGLOBAL (8), COVERAGE (69),
-  CAPTURE (70), GETUDATAKS (83), CMPPROTO (88), FASTPCALL (89). CAPTURE
-  is plausibly consumed inline by the closure handlers (like the AUX
-  words other handlers read directly); the rest may hide in the few
-  unidentified slots or in shared-trampoline shapes.
-- The slot-22 probe trampoline and the slot-74/slot-236 store pair:
-  one open question each (see notes).
+- `CAPTURE` is consumed inline by the closure handlers and its table slot
+  is a `UD2` trap; all other opcodes are mapped, with the full table in
+  [Luau VM encodings](11-luau-vm-encodings.md).
+- Index-to-builtin-name assignment for the two `FASTCALL` tables.
 - Full library open list vs flag-gated subsets per build.
 
 ## A note on the address list

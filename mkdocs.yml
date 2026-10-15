@@ -61,6 +61,7 @@ nav:
       - Script execution, end to end: 07-script-execution.md
       - TaskScheduler internals: 08-scheduler-internals.md
       - Luau VM lifecycle: 09-luau-vm-lifecycle.md
+      - Luau VM encodings: 11-luau-vm-encodings.md
       - Replication deserialize path: 10-replication-deserialize.md
   - Reference:
       - DataModel: 01-datamodel.md

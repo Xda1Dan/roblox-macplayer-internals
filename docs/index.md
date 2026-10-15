@@ -51,7 +51,7 @@ almost everything asynchronous runs as a job in the TaskScheduler
 - :material-map-outline: **Walkthroughs**
 
     Binary overview, script execution end to end, TaskScheduler internals,
-    Luau VM lifecycle, and the replication deserialize path.
+    Luau VM lifecycle and encodings, and the replication deserialize path.
     [Start here](00-overview.md)
 
 - :material-book-open-variant: **Reference**
@@ -137,8 +137,12 @@ Execution enters through a dispatch stub (`0x1029adfd3`) that checks the
 `singlestep` flag and jumps into one of two opcode tables —
 `0x1072d8a30` (single-step loop) or `0x1072d9230` (normal loop) — each
 with 93 handler slots in identical positions but separate handler copies.
-The slot order does not match public Luau `LOP_*` order, so bytecode
-bytes are shuffled relative to stock Luau.
+The slots do not follow public Luau `LOP_*` order: the byte on disk is
+`wire = (227 * canonical) & 0xFF` and the byte the interpreter dispatches
+on is `T[wire]`, for a 256-byte permutation `T` at `0x1063bb686`. The
+full opcode map, and the address-relative pointer encodings the VM applies
+to some object fields, are in
+[Luau VM encodings](11-luau-vm-encodings.md).
 
 The public name `lua_pcall` is absent, but protected execution is present:
 `luaB_pcall` (`0x10298b913`), `luaB_pcallrun` (`0x10298b946`),

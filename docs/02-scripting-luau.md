@@ -193,7 +193,7 @@ is selective. Ordinary direct string references still exist elsewhere.
 |---|---|
 | `0x299fd5b` | state create and init: allocator callback and context, then protected init |
 | `0x29a9f36` | protected bytecode load: stack and memory checks, load, cursor restore |
-| `0x29adfd3` | `luau_execute` dispatch stub: singlestep check, then opcode jump table at `0x1072d9230` (see the Luau VM doc) |
+| `0x29adfd3` | `luau_execute` dispatch stub: singlestep check, then opcode jump table at `0x1072d9230` (see [Luau VM encodings](11-luau-vm-encodings.md)) |
 | `0x15566d6` | resume: pending-name log, shutdown and C-stack checks, VM re-entry |
 | `0x14cf74a` | `task.wait`: yieldable-thread check, mark waiting, timed resume |
 | `0x55d5e74` | facet accessor: index below 3 returns `context+0xdc0`, else `Invalid Facet Access` |

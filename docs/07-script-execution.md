@@ -393,8 +393,10 @@ involvement.
 
 ## Unknowns (kept honest)
 
-- Exact `lua_State` field offsets and helper names behind the VM calls.
-- Interpreter loop bodies behind the `0x1072d9230` opcode table.
+- Helper names behind the VM calls.
+- The 93 interpreter slots behind the `0x1072d9230` table, with handler
+  addresses, and the `lua_State` / `Proto` / `Closure` layouts are in
+  [Luau VM encodings](11-luau-vm-encodings.md).
 - Exact waiting-queue budget/deadline tunables per build.
 - ScriptContext construction call-site and GC flag application point
   (see above for how far the trace got).

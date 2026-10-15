@@ -135,8 +135,14 @@ Execution enters through a dispatch stub (`0x1029adfd3`) that checks the
 `singlestep` flag and jumps into one of two opcode tables —
 `0x1072d8a30` (single-step loop) or `0x1072d9230` (normal loop) — each
 with 93 handler slots in identical positions but separate handler copies.
-The slot order does not match public Luau `LOP_*` order, so bytecode
-bytes are shuffled relative to stock Luau.
+The slots do not follow public Luau `LOP_*` order. The permutation is
+exact: the byte on disk is `wire = (227 * canonical) & 0xFF`, and the
+dispatched byte is `T[wire]`, for the 256-byte table `T` at `0x1063bb686`
+(the binary ships the inverse `R` at `0x10648bb74`). All 93 opcodes were
+resolved this way and cross-checked against their handler bodies. See
+[Luau VM encodings](https://xda1dan.github.io/roblox-macplayer-internals/11-luau-vm-encodings/)
+for the full map and for the address-relative pointer encodings applied to
+some VM object fields.
 
 The public name `lua_pcall` is absent, but protected execution is present:
 `luaB_pcall` (`0x10298b913`), `luaB_pcallrun` (`0x10298b946`),
