@@ -56,7 +56,7 @@ protection settings for JIT, audio input, and camera.
 - WebRTC `RTC*`, `GamepadSupport`, `SDL3_Rumble*`, display, thermal, and
   battery helpers.
 
-Full table: [05-objc-bridge.md](05-objc-bridge.md).
+Full table: [Objective-C bridge](objc-bridge.md).
 
 Key app callbacks in this build:
 

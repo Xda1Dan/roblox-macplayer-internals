@@ -6,21 +6,21 @@
 
 ```
 allocator callback + context
-  |  0x10299fd5b  lua_newstate (alloc 0x4d60, init, protected init)
+  |  lua_newstate (alloc 0x4d60, init, protected init) — 0x10299fd5b
   v
 ScriptContext VM wrapper
-  |  0x1015b92cd  caller: hooks + libraries + _G + sandbox + retain
+  |  caller: hooks + libraries + _G + sandbox + retain — 0x1015b92cd
   v
 compile / load boundary
-  |  0x1029a9f36  loadsafe-shaped protected load
+  |  loadsafe-shaped protected load — 0x1029a9f36
   |  bytecode auth + "Invalid Bytecode." guards
   v
 protected execution
-  |  0x10298b913  luaB_pcall wrapper
-  |  0x102995084  luaD_rawrunprotected boundary
-  |  0x102995125  luaD_throw (C++ exception in this build)
-  |  0x1029940f4  luaG_runerror
-  |  0x1029adfd3  luau_execute dispatch stub (singlestep check + jump table)
+  |  luaB_pcall wrapper — 0x10298b913
+  |  luaD_rawrunprotected boundary — 0x102995084
+  |  luaD_throw (C++ exception in this build) — 0x102995125
+  |  luaG_runerror — 0x1029940f4
+  |  luau_execute dispatch stub (singlestep check + jump table) — 0x1029adfd3
   v
 selective pointer hardening (string-reference hardening)
 ```
@@ -145,7 +145,7 @@ Checked against Luau source, the labels hold up:
 
 ### `luau_execute` is a dispatch stub
 
-`0x1029adfd3` (0xfb bytes) is not the interpreter loop — it is the
+The stub (`0x1029adfd3`, 0xfb bytes) is not the interpreter loop — it is the
 entry that selects *which* loop to enter. Cross-checked against Luau
 source (`lvmexecute.cpp`, `lstate.h`):
 
@@ -202,7 +202,7 @@ The permutation is exact, not approximate. The byte on disk is `wire =
 the inverse too (`R` at `0x10648bb74`, with `R[T[wire]] == canonical`).
 All 93 slots were resolved by this round trip and cross-checked against
 their handler bodies. The full table and the arithmetic live in
-[Luau VM encodings](11-luau-vm-encodings.md). Stock-Luau bytecode still
+[Luau VM encodings](luau-vm-encodings.md). Stock-Luau bytecode still
 will not execute here even where the VM logic is identical.
 
 ---
@@ -282,14 +282,14 @@ and never reads the `B` register, while `SETTABLEKS` (vmop 236,
 `0x1029b5301`) reads `B` as the table. They are two opcodes, not one
 twice. The opcode byte values, the two loops' separate handler copies, and
 the parity between them are tabulated in
-[Luau VM encodings](11-luau-vm-encodings.md).
+[Luau VM encodings](luau-vm-encodings.md).
 
 ## Unknowns
 
 - Exact helper names behind VM start / resume calls.
 - `CAPTURE` is consumed inline by the closure handlers and its table slot
   is a `UD2` trap; all other opcodes are mapped, with the full table in
-  [Luau VM encodings](11-luau-vm-encodings.md).
+  [Luau VM encodings](luau-vm-encodings.md).
 - Index-to-builtin-name assignment for the two `FASTCALL` tables.
 - Full library open list vs flag-gated subsets per build.
 

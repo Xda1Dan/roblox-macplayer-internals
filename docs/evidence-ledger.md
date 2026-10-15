@@ -16,11 +16,11 @@ SHA-256 `ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47`.
 | Mach-O layout, entry, libraries, RPATHs | Mach-O headers (54 load commands), section table |
 | 63 app classes and method addresses | `__objc_classlist` (`0x10747bab8`, 0x1f8) |
 | Lua-start, leave-game, deeplink, focus, and web-message behavior | Function bodies at the cited addresses |
-| Job submit, enqueue, wake, ring, start, stop, node pool | Bodies at `0x10521311e`, `0x104f54dc6`, `0x104f54c96`, `0x104f54876`, `0x102ee57de`, `0x102eec6da`, `0x102eec76c`, `0x102ee3136`, `0x102eeac76`, `0x102ee3332` |
+| Job submit (build `0x10521311e`, dispatch `0x104f54dc6`, enqueue `0x104f54c96`), ring insert (`0x104f54876`), wake (`0x102ee57de`), start/stop (`0x102eec6da`, `0x102eec76c`), node allocator (`0x102ee3136`), worker pop/dispatch (`0x102eeac76`, `0x102ee3332`) |
 | Singletons, session accessor, guards | Bodies at the cited addresses |
 | Service roster, facet and method names, Luau markers, log lines | String table (883k entries), 761 log channels |
 | Hidden engine symbols | Shipped symtab: 2275 entries, no Lua, DataModel, or net code symbols; mostly standard-library type names |
-| Opcode numbering, pointer encodings, VM object layouts | Binary tables `0x1063bb686` / `0x10648bb74` and the accessor code (`0x102996918`, `0x102993f3c`) - see the Luau VM encodings page |
+| Opcode numbering, pointer encodings, VM object layouts | Binary tables `T` (`0x1063bb686`) / `R` (`0x10648bb74`) and the decoder code `luaF_freeproto` (`0x102996918`), `Proto.source` decode (`0x102993f3c`) — see the [Luau VM encodings](luau-vm-encodings.md) page |
 | Deep Luau pillar semantics (GC, full interpreter bodies) | Public Luau source as a reference, not a binary fact |
 | Service membership | Binary names plus public Roblox API docs, labeled where used |
 
@@ -35,10 +35,10 @@ These are unknowns, not oversights:
   tunables were not established.
 - Struct offsets such as `+0x778` belong to this build only and move
   between versions.
-- `luau_execute` (`0x29adfd3`) is a dispatch stub (singlestep check plus
+- `luau_execute` (`0x1029adfd3`) is a dispatch stub (singlestep check plus
   opcode jump table). The 93 slots, the `wire -> vmop` permutation, and the
   per-slot handler addresses are mapped in
-  [Luau VM encodings](11-luau-vm-encodings.md); the individual opcode
+  [Luau VM encodings](luau-vm-encodings.md); the individual opcode
   bodies are not summarized here.
 - Exact wire formats, helper names behind internal calls, and per-build
   tunable values are not claimed.

@@ -6,8 +6,8 @@ Notes on how one Roblox macOS player build is put together — engine
 architecture, the Luau VM, the TaskScheduler, RakNet replication, and
 the DataModel — illustrated with small, runnable C++ examples.
 
-[Walkthroughs](00-overview.md){ .md-button .md-button--primary }
-[Reference](01-datamodel.md){ .md-button }
+[Start here](overview.md){ .md-button .md-button--primary }
+[Engine internals](datamodel.md){ .md-button }
 [Examples](examples.md){ .md-button }
 [Repository](https://github.com/Xda1Dan/roblox-macplayer-internals){ .md-button }
 
@@ -44,36 +44,36 @@ DataModel -- services -- ScriptContext -- Luau VMs
 almost everything asynchronous runs as a job in the TaskScheduler
 ```
 
-## Read in this order
+## Start here
 
 <div class="grid cards" markdown>
 
-- :material-map-outline: **Walkthroughs**
+- :material-map-outline: **Overview**
 
-    Binary overview, script execution end to end, TaskScheduler internals,
-    Luau VM lifecycle and encodings, and the replication deserialize path.
-    [Start here](00-overview.md)
+    Binary layout, entry point, linked frameworks, and the app boundary.
+    [Binary overview](overview.md)
 
-- :material-book-open-variant: **Reference**
+- :material-language-lua: **Scripting and the VM**
 
-    DataModel, Luau scripting, replication net, job scheduler, Objective-C
-    bridge, and evidence ledger.
-    [Browse reference](01-datamodel.md)
+    Script execution end to end, the Luau scripting catalog, the VM
+    lifecycle, and the opcode and pointer encodings.
+    [Script execution](script-execution.md)
 
-- :material-code-braces: **C++ examples**
+- :material-cog-outline: **Engine internals**
 
-    Reflection, job queue, SSO string, DataModel, and optional Luau VM
-    demonstrations.
-    [See examples](examples.md)
+    DataModel, TaskScheduler, RakNet replication, and the Objective-C
+    bridge.
+    [DataModel](datamodel.md)
 
-- :material-shield-check-outline: **Limits**
+- :material-shield-check-outline: **Reference and limits**
 
-    What was verified in this build and what is explicitly not claimed.
-    [Read caveats](06-evidence-ledger.md)
+    C++ examples plus exactly what was verified in this build and what is
+    not claimed.
+    [Evidence ledger](evidence-ledger.md)
 
 </div>
 
-Each walkthrough follows the same shape: big picture, step by step,
+Each walkthrough and reference page follows the same shape: big picture, step by step,
 behavior in code form, machine code, addresses, and explicit limits.
 
 Short machine-code excerpts are facts about the binary. Longer C++
@@ -86,7 +86,7 @@ listings are original illustrations, not player source.
 The DataModel is the root of one game session. Join creates it. Network
 and script work hold weak or shared references to it. Close drains that
 work first, then clears service containers one by one, then releases
-script state. The close path at `0x104542918` clears StarterPack,
+script state. The close routine (`CloseDataModel`, `0x104542918`) clears StarterPack,
 StarterPlayer, TextChatService, StarterGui, CoreGui, Teams, Lighting,
 ReplicatedStorage, ReplicatedFirst, ServerStorage, ServerScriptService,
 ChatService, and others.
@@ -110,25 +110,25 @@ Script instance
   -> later resume
 ```
 
-The start path at `0x10158ac46` allows at most three levels of
+The start path (`0x10158ac46`) allows at most three levels of
 re-entrant start, opens a `Script Start` region, hands off to a VM thread,
-and keeps shared ownership alive across callbacks. The waiting paths at
-`0x1015a8d94` and `0x1015a9249` claim one resume flag, drain a
+and keeps shared ownership alive across callbacks. The waiting paths
+(`WaitingHybridScriptsJob` drain, `0x1015a8d94` / `0x1015a9249`) claim one resume flag, drain a
 bounded number of waiters, respect a deadline, and release each waiter.
 
-Permission is decided at `0x10142a7a6`. Server scripts need the native
+Permission is decided by the admission predicate (`0x10142a7a6`). Server scripts need the native
 `RunServerScript` capability. Client scripts need `RunClientScript`.
 Service location, ancestry, DataModel state, and plugin rules are checked
 as well. Lua code does not grant itself a higher level.
 
-On the Luau side, `lua_newstate` (`0x299fd5b`), the protected load
-boundary (`0x29a9f36`), `ScriptContextResume` (`0x15566d6`), and
-`task.wait` (`0x14cf74a`) are real function starts. `task.wait` marks the
+On the Luau side, `lua_newstate` (`0x10299fd5b`), the protected load
+boundary (`0x1029a9f36`), `ScriptContextResume` (`0x1015566d6`), and
+`task.wait` (`0x1014cf74a`) are real function starts. `task.wait` marks the
 coroutine waiting and schedules a later resume. It does not sleep a worker
 thread. `ScriptContextResume` checks pending state, shutdown deadline, and
 a C-stack limit before re-entering.
 
-State creation runs through `0x1015b92cd`: allocator and context,
+State creation runs through the VM-creation path (`0x1015b92cd`): allocator and context,
 `lua_newstate`, VM wrapper, error hooks, libraries and Roblox bindings,
 `_G` and sandbox setup, then the VM collection owns it. States belong to
 the collection. Scripts borrow threads from it.
@@ -142,7 +142,7 @@ The slots do not follow public Luau `LOP_*` order: the byte on disk is
 on is `T[wire]`, for a 256-byte permutation `T` at `0x1063bb686`. The
 full opcode map, and the address-relative pointer encodings the VM applies
 to some object fields, are in
-[Luau VM encodings](11-luau-vm-encodings.md).
+[Luau VM encodings](luau-vm-encodings.md).
 
 The public name `lua_pcall` is absent, but protected execution is present:
 `luaB_pcall` (`0x10298b913`), `luaB_pcallrun` (`0x10298b946`),
@@ -181,7 +181,8 @@ and hands them to replication processing. It only ever sees typed records
 because `Replicator::OnReceive` (`0x10561fb20`) dispatches the
 message-ID byte first: `0x15`/`0x16` connection teardown, `0x1b` physics
 (dropped when the receiver is not ready, basis-index ordered otherwise),
-`0x81`/`0x83`/`0x86` replication queued via `0x1055fa738`. The exact wire
+`0x81`/`0x83`/`0x86` replication queued via the replication enqueue
+(`0x1055fa738`). The exact wire
 schema is not claimed here.
 
 ### The scheduler carries everything
@@ -190,18 +191,19 @@ Objective-C callbacks, network receives, Lua callbacks, frame work, and
 maintenance all become scheduled work:
 
 ```text
-0x10521311e -> 0x104f54dc6 -> 0x104f54c96 -> 0x104f54876
-                                      -> 0x104545ba0
-                                      -> 0x102ee57de wakeup
+job build (0x10521311e) -> dispatch (0x104f54dc6) -> enqueue (0x104f54c96)
+                                       -> ring insert (0x104f54876) -> record ring (0x104545ba0)
+                                       -> wakeup helper (0x102ee57de)
 ```
 
-`0x104545ba0` grows and copies a circular 0x80-byte record buffer. Job
-start at `0x102eec6da` marks a job active and calls its step function.
+The record ring (`0x104545ba0`) grows and copies a circular 0x80-byte record buffer. Job
+start (`0x102eec6da`) marks a job active and calls its step function.
 Job stop clears the active state, calls the stop hook, records elapsed
-time, and updates the arbiter. Node allocation at `0x102ee3136` uses a
+time, and updates the arbiter. Node allocation (`0x102ee3136`) uses a
 bounded pool. Running out of nodes is fatal. Workers pop from the same
 queue record enqueue writes to, promote the queued weak reference back to
-shared (`0x102eeac76`), and dispatch through `0x102ee3332` — a job
+shared (`0x102eeac76`), and dispatch through the worker dispatch stub
+(`0x102ee3332`) — a job
 that dies while queued simply never runs.
 
 Shutdown drains waiting threads and yield waiters before destroying

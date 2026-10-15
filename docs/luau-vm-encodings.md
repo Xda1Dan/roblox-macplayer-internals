@@ -8,7 +8,7 @@
 Both are read directly out of `__DATA:__const` and the accessor code, and
 checked against stock Luau (`Common/include/Luau/Bytecode.h`,
 `CodeGen/src/IrUtils.cpp`, `VM/src/lvmload.cpp`). Where the
-[Luau VM lifecycle](09-luau-vm-lifecycle.md) walkthrough identifies
+[Luau VM lifecycle](luau-vm-lifecycle.md) walkthrough identifies
 handlers by *behavior*, the opcode mapping here is *derived* from the
 binary's own tables and reproduces all 93 opcodes, not a sample.
 

@@ -9,7 +9,7 @@ stack.
 ## Layers, outside in
 
 1. **Join** — protocol URL, `handleDeeplinkUrlV2` (`0x1000376fd`),
-   session via `0x1051e5369`, plus join stats and avatar metrics.
+   session via the session accessor (`0x1051e5369`), plus join stats and avatar metrics.
 2. **Transport** — `NetworkClient` over `RbxTransport` (connections,
    listeners, slots, TLS, QUIC, channel tracking), RakNet underneath
    (connect and packet traces, join-or-disconnect requests, ping stages).

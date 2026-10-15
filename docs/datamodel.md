@@ -22,7 +22,8 @@ JoinRequested (deeplink / protocol)
 
 Teleport is `Running -> Leaving -> JoinRequested`.
 
-Session lookup for deeplinks and leave-game goes through `0x1051e5369`.
+Session lookup for deeplinks and leave-game goes through the session
+accessor (`0x1051e5369`).
 Nearby singletons are a factory/manager (`0x105235e96` → `0x107510308`)
 and a global manager (`0x10118fab6` → `0x107a61588`).
 
@@ -135,10 +136,10 @@ See `include/rbx/reflection.hpp` and `src/reflection_demo.cpp`.
 
 `Players` is a full service, not just a list.
 
-Events declared at `0x100bae0c0` include `PlayerAdded`,
+Events declared at the Players event-descriptor table (`0x100bae0c0`) include `PlayerAdded`,
 `PlayerRemoving`, `PlayerConnecting`, `PlayerDisconnecting`,
 `PlayerRejoining`, `PlayerMembershipChanged`, and `PlayerChatted`.
-Operations declared at `0x100bac24b` include `getPlayers`,
+Operations declared at the Players function-descriptor table (`0x100bac24b`) include `getPlayers`,
 `playerFromCharacter`, `ResetLocalPlayer`, user and thumbnail lookups,
 character-description creation, moderation and ban calls, and chat helpers.
 
@@ -175,7 +176,7 @@ Step by step, close does this:
 4. Release VM state only after the drains above.
 5. Release the DataModel itself.
 
-The close routine lives at `0x104542918`. The exact service list is
+The close routine (`CloseDataModel`) lives at `0x104542918`. The exact service list is
 build-specific and partly flag-gated.
 
 Behavior in code form:
@@ -208,4 +209,4 @@ C++ model: `include/rbx/datamodel.hpp`, demo in
 
 - Exact service offsets and vtable layouts across versions.
 - The full flag-gated service list for other builds.
-- Wire formats for replication (see the networking notes).
+- Wire formats for replication (see the [Networking reference](replication-net.md)).

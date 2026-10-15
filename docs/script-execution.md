@@ -6,32 +6,32 @@
 
 ```
 Instance (Script / LocalScript / ModuleScript)
-  │  0x10142a7a6  admission predicate
+  │  admission predicate — 0x10142a7a6
   ▼
 source (ProtectedString) or bytecode asset
-  │  0x101593650  compilation-cache boundary
-  │  0x10159502e  policy gate (restricted / malicious)
+  │  compilation-cache boundary — 0x101593650
+  │  policy gate (restricted / malicious) — 0x10159502e
   ▼
 execution record
-  │  0x10158cc58  init
-  │  0x10158ac46  start path (re-entrancy ≤ 3, "Script Start" scope)
+  │  init — 0x10158cc58
+  │  start path (re-entrancy ≤ 3, "Script Start" scope) — 0x10158ac46
   ▼
 VM collection thread
-  │  0x1015b92cd  creates/owns lua_State, 0x10299fd5b lua_newstate
+  │  creates/owns lua_State; lua_newstate — 0x1015b92cd / 0x10299fd5b
   ▼
 Luau resume
-  │  0x1015566d6  ScriptContextResume (deadline, C-stack, timing)
-  │  0x101557e8c  async-callback entry (weak script check)
+  │  ScriptContextResume (deadline, C-stack, timing) — 0x1015566d6
+  │  async-callback entry (weak script check) — 0x101557e8c
   ▼
 yield / wait / complete / error
-  │  0x1014cf74a  task.wait (no OS sleep)
-  │  0x1015977c1  coroutine admission gate
-  │  0x10158dd88  require state machine
+  │  task.wait (no OS sleep) — 0x1014cf74a
+  │  coroutine admission gate — 0x1015977c1
+  │  require state machine — 0x10158dd88
   ▼
-WaitingHybridScriptsJob  0x1015a8d94 / 0x1015a9249
+WaitingHybridScriptsJob — 0x1015a8d94 / 0x1015a9249
   │  bounded drain, deadline, atomic resume flag
   ▼
-teardown  0x1015a7d1e → 0x1015bab74
+teardown — 0x1015a7d1e → 0x1015bab74
 ```
 
 ---
@@ -324,7 +324,7 @@ prevents double-resume of a running or finished coroutine.
 “resuming” flag with a bounded spin, pop up to N ready waiters, stop at the
 deadline, resume each, release each shared waiter, update scheduler
 bookkeeping. The second body adds a context/queue predicate and can evict
-via `0x1015a837c`.
+via the eviction helper (`0x1015a837c`).
 
 **Teardown — what it does, in order:**
 
@@ -346,17 +346,17 @@ that does is a use-after-free by construction.
 
 ## ScriptContext creation and destruction
 
-**What is established.** The destruction side is fully mapped at
-`0x1015466d8`: facet teardown helpers run first, then the scheduler
+**What is established.** The destruction side is fully mapped at the
+ScriptContext destructor (`0x1015466d8`): facet teardown helpers run first, then the scheduler
 facet at `+0x128` (`0x1015a7d1e`), then the VM collection at `+2`
 (`0x1015bab74`), then a final release helper. Three related addresses
 form a triad with it:
 
-| Address | Role |
-|---|---|
-| `0x101545276` | facet state machine: `+0x12a0` moves `1→2` (destroy the context at `+0x180`), then `→3`; any other state reports `Invalid Facet Access` |
-| `0x1055d5e74` | facet accessor: state below `3` returns `context+0xdc0`, otherwise `Invalid Facet Access` |
-| `0x1015466d8` | destructor body described above |
+| Routine | Address | Role |
+|---|---|---|
+| facet state machine | `0x101545276` | `+0x12a0` moves `1→2` (destroy the context at `+0x180`), then `→3`; any other state reports `Invalid Facet Access` |
+| facet accessor | `0x1055d5e74` | state below `3` returns `context+0xdc0`, otherwise `Invalid Facet Access` |
+| ScriptContext destructor | `0x1015466d8` | destructor body described above |
 
 **What is not established.** The exact construction call-site (which
 `operator new` size, which caller runs the facet constructors) was chased
@@ -396,7 +396,7 @@ involvement.
 - Helper names behind the VM calls.
 - The 93 interpreter slots behind the `0x1072d9230` table, with handler
   addresses, and the `lua_State` / `Proto` / `Closure` layouts are in
-  [Luau VM encodings](11-luau-vm-encodings.md).
+  [Luau VM encodings](luau-vm-encodings.md).
 - Exact waiting-queue budget/deadline tunables per build.
 - ScriptContext construction call-site and GC flag application point
   (see above for how far the trace got).

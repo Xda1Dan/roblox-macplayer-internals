@@ -7,23 +7,23 @@ and run by workers after an explicit wakeup.
 
 ## Submit path
 
-`0x10521311e` → `0x104f54dc6` → `0x104f54c96`
+Job build (`0x10521311e`) → dispatch (`0x104f54dc6`) → enqueue (`0x104f54c96`)
 
 1. The caller holds the scheduler singleton (`0x10520e072` →
    `0x107c54890`, initialized once) and a payload of shared pointers.
-2. `0x10521311e` (0x260 bytes) locks the payload, builds a 0x30-byte job
+2. Job build (`0x10521311e`, 0x260 bytes) locks the payload, builds a 0x30-byte job
    object (vtable `0x10742d0f0`), bumps reference counts atomically, and
-   calls `0x104f54dc6`.
-3. `0x104f54dc6` (0x4a1 bytes) copies the item, calls
-   `0x104f54c96(scheduler, item, queueIndex)`, then destroys the temporary
+   calls job dispatch (`0x104f54dc6`).
+3. Job dispatch (`0x104f54dc6`, 0x4a1 bytes) copies the item, calls
+   enqueue (`0x104f54c96(scheduler, item, queueIndex)`), then destroys the temporary
    (`0x104544be6`).
-4. `0x104f54c96` (0xf7 bytes):
+4. Enqueue (`0x104f54c96`, 0xf7 bytes):
    - lock the mutex at `scheduler+0x778`, unlock on scope exit;
    - select the queue at `scheduler+0x780` by `index * 0x10`;
-   - copy the item in, insert with `0x104f54876(queue+0x1b0)` into
-     `0x104545ba0`;
-   - wake workers with `0x102ee57de`.
-5. `0x102ee57de` (0x313 bytes) handles thread wakeup plus main-thread
+   - copy the item in, insert with ring insert (`0x104f54876(queue+0x1b0)`) into
+     the record ring (`0x104545ba0`);
+   - wake workers with the wakeup helper (`0x102ee57de`).
+5. The wakeup helper (`0x102ee57de`, 0x313 bytes) handles thread wakeup plus main-thread
    dispatch (`AppleMainThreadBlockingFix`, key `_DAT_10780cf10`). This is
    also how background threads hand UI work to the app thread.
 
@@ -42,11 +42,11 @@ void submit(Job job, size_t shard = 0) {
 
 ## Queue storage
 
-- `0x104545ba0` (0xc3 bytes) copies 0x80-byte records into a circular
+- The record ring (`0x104545ba0`, 0xc3 bytes) copies 0x80-byte records into a circular
   buffer. Capacity grows by 1.5x (`cap*3/2`, minimum 4), then records move
   using the old head offset and current count. Placement is
   `((count + head) % capacity) * 0x80`. This is a ring, not a hash table.
-- `0x10453826a` (0x52 bytes) copies the item at enqueue time. Payloads are
+- The item copier (`0x10453826a`, 0x52 bytes) copies the item at enqueue time. Payloads are
   copied under the lock, never referenced.
 - Workers wait on a predicate and pop one item per wakeup. See
   `TaskScheduler::runOne` in `include/rbx/scheduler.hpp`.
@@ -106,7 +106,7 @@ The worker side mirrors enqueue. At `0x102eeac76` (`TS::Reschedule`
 region) the worker locks the same queue record enqueue inserts into
 (`+0x1b0`), pops the next job, and promotes its weak reference with
 `shared_weak_count::lock`. An expired job simply never runs. The live job
-goes through `0x102ee3332`, which re-checks the lock state and makes
+goes through the worker dispatch stub (`0x102ee3332`), which re-checks the lock state and makes
 the virtual step call at vtable offset `+0x10`.
 
 ```cpp

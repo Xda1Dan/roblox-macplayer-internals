@@ -56,21 +56,24 @@ site_dir: site
 
 nav:
   - Home: index.md
-  - Walkthroughs:
-      - Binary overview: 00-overview.md
-      - Script execution, end to end: 07-script-execution.md
-      - TaskScheduler internals: 08-scheduler-internals.md
-      - Luau VM lifecycle: 09-luau-vm-lifecycle.md
-      - Luau VM encodings: 11-luau-vm-encodings.md
-      - Replication deserialize path: 10-replication-deserialize.md
+  - Overview: overview.md
+  - Scripting and the VM:
+      - Script execution: script-execution.md
+      - Luau scripting: scripting-luau.md
+      - Luau VM lifecycle: luau-vm-lifecycle.md
+      - Luau VM encodings: luau-vm-encodings.md
+  - Scheduler:
+      - Job scheduler: job-scheduler.md
+      - Scheduler internals: scheduler-internals.md
+  - Networking:
+      - Replication: replication-net.md
+      - Deserialize path: replication-deserialize.md
+  - Engine:
+      - DataModel: datamodel.md
+      - Objective-C bridge: objc-bridge.md
   - Reference:
-      - DataModel: 01-datamodel.md
-      - Scripting (Luau): 02-scripting-luau.md
-      - Networking (replication): 03-replication-net.md
-      - Job scheduler: 04-jobscheduler.md
-      - Objective-C bridge: 05-objc-bridge.md
-      - Evidence ledger: 06-evidence-ledger.md
-  - Examples: examples.md
+      - Examples: examples.md
+      - Evidence and limits: evidence-ledger.md
 
 markdown_extensions:
   - abbr

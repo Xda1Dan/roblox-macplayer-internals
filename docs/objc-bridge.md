@@ -69,11 +69,12 @@ void onWebScriptMessage(std::string bodyUtf8) {
 ```
 
 At the machine level, the focus path builds `AppInput` / `""` /
-`"Focused"` at `0x100016179` (0x58 bytes) and fires through
-`0x102ec8158` / `0x102ec81a0`. The web-message path converts the message
+`"Focused"` at `0x100016179` (0x58 bytes) and fires through the event
+dispatch helpers (`0x102ec8158` / `0x102ec81a0`). The web-message path converts the message
 body to UTF-8, copies it into an engine string (`0x102d49d80`), resolves
-through `0x104929a60` / `0x104f2965c` and global `0x10003ddee`, then
-dispatches at `0x10520f486`.
+through the lookup helpers (`0x104929a60` / `0x104f2965c`) and the global
+dispatch table (`0x10003ddee`), then dispatches at the script-message
+handler (`0x10520f486`).
 
 ## Media and misc
 

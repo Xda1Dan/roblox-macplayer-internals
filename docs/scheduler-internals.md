@@ -7,20 +7,20 @@
 
 ```
 caller (holds scheduler + payload of shared_ptrs)
-  │  0x10521311e  build 0x30-byte job (vtable 0x10742d0f0)
+  │  build 0x30-byte job (vtable 0x10742d0f0) — 0x10521311e
   ▼
-0x104f54dc6  copy + dispatch to queue index
+copy + dispatch to queue index — 0x104f54dc6
   ▼
-0x104f54c96  lock shard mutex → copy item → ring insert → wake
-  │  ├─ 0x104f54876 → 0x104545ba0  ring buffer growth/copy
-  │  └─ 0x102ee57de  cross-thread wake (+ AppKit bounce)
+lock shard mutex → copy item → ring insert → wake — 0x104f54c96
+  │  ├─ ring buffer growth/copy — 0x104f54876 → 0x104545ba0
+  │  └─ cross-thread wake (+ AppKit bounce) — 0x102ee57de
   ▼
 worker: arbiter → virtual step (+0x10) → virtual stop (+0x18)
-  │  0x102eec6da  JobStart wrapper
-  │  0x102eec76c  JobStop wrapper (timing + arbiter update)
-  │  0x102ee3136  bounded node allocator (exhaustion = fatal)
-  │  0x102eeac76  worker pop: lock +0x1b0 record, weak→shared promote
-  │  0x102ee3332  dispatch: lock check + virtual step call
+  │  JobStart wrapper — 0x102eec6da
+  │  JobStop wrapper (timing + arbiter update) — 0x102eec76c
+  │  bounded node allocator (exhaustion = fatal) — 0x102ee3136
+  │  worker pop: lock +0x1b0 record, weak→shared promote — 0x102eeac76
+  │  dispatch: lock check + virtual step call — 0x102ee3332
 ```
 
 ---
@@ -137,15 +137,15 @@ void ringAppend(Ring& r, const Record* first, const Record* last) {
 
 ## 3. Run — virtual step/stop + node pool
 
-**`0x102eec6da` (JobStart)** — mark active, log arbiter/timestamp,
+**JobStart (`0x102eec6da`)** — mark active, log arbiter/timestamp,
 `CALL [job+0x10]`. The scheduler never switches on job type; dispatch is
 one indirect call.
 
-**`0x102eec76c` (JobStop)** — clear active, `CALL [job+0x18]`,
+**JobStop (`0x102eec76c`)** — clear active, `CALL [job+0x18]`,
 record elapsed/stop time, update arbiter, emit `JobStop` (+ per-thread
 diagnostic ring under profiling flags).
 
-**`0x102ee3136` (node allocator)** — pull a node from the bounded
+**Node allocator (`0x102ee3136`)** — pull a node from the bounded
 pool, copy shared state with atomic incs, CAS-publish into the arbiter
 table. Exhaustion is fatal:
 

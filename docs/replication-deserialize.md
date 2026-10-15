@@ -12,7 +12,7 @@ Replicator::OnReceive  0x10561fb20 (client; server: 0x105682678 / 0x1056843e4)
   |  read message-ID byte -> dispatch table below
   |  0x15/0x16 connection, 0x1b physics, 0x81/0x83/0x86 replication
   |  server handles 0x8d/0x8f/0x90/0x96/0x99/0x9c/0xa7 locally, forwards rest
-  |  typed items via 0x1055fa738 (returns 2 = queued, 1 = inline, 0 = special)
+  |  typed items via the item enqueue 0x1055fa738 (returns 2 = queued, 1 = inline, 0 = special)
   v
 buffered deserializer  0x10564dd3c  (0xde0 bytes, ~0xb98 frame)
   |  lock queue -> pop record -> timing/counters -> temp record
@@ -138,7 +138,7 @@ void deserializeDrain(Job* j) {
 - Ownership is explicit: temp records are stack-scoped, shared state uses
   atomic ref bumps, queue cursors are snapshots.
 
-## 2. OnReceive dispatch — `0x10561fb20`
+## 3. OnReceive dispatch — `0x10561fb20`
 
 **What it does:** reads the first payload byte and routes the packet.
 Return code is the contract: `0` = special-cased, `1` = handled inline,
@@ -173,17 +173,18 @@ change, delete, event invocation, join data). Every `returns 2` path ends
 there; that is why the deserializer at `0x10564dd3c` only ever sees
 typed records, never raw sockets.
 
-## 3. Server side — `0x105682678` and `0x1056843e4`
+## 4. Server side — `0x105682678` and `0x1056843e4`
 
 **What they do:** the server's front door. Same message-ID switch shape as
 the client, but server-only IDs (join, auth, spawn, shared-string setup)
 are handled locally while everything else is forwarded to the
 client-style handler.
 
-The two entries are the same dispatch adapted to two packet layouts:
-`0x105682678` takes the flat-buffer form and delegates to `0x10561fb20`;
-`0x1056843e4` takes the packet-struct form and delegates to `0x105621556`
-(a near-clone of the client body using `0x1055fab6e` for enqueue).
+The two entries are the same dispatch adapted to two packet layouts: the
+flat-buffer server entry (`0x105682678`) delegates to the client handler
+(`0x10561fb20`); the packet-struct entry (`0x1056843e4`) delegates to a
+near-clone of the client body (`0x105621556`) that uses `0x1055fab6e` for
+enqueue.
 
 **Step by step**
 
