@@ -18,3 +18,8 @@ site/
 # Python
 __pycache__/
 *.py[cod]
+
+# C++ build artifacts
+*.o
+*.a
+vm-repro/tests/rbx*-tests
