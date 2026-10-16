@@ -2,6 +2,19 @@
 
 Field layouts recovered from decompilation. All offsets are from the object base.
 
+> **Corrections (2026-10):** three fields in this file were corrected by the
+> ScriptContext deep dive (`vm-research/01-scriptcontext.md`):
+> 1. The "lifecycle level ≥ 3" facet gates are the **reverse**: the facet
+>    (`ctx−0x888`) and scheduler queue (`lane+0xac0`) are valid while the phase
+>    counter (`ctx+0xa18` / `lane+0x12a0`) is **< 3**; `≥ 3` is a fatal
+>    `"Invalid Facet Access"`.
+> 2. ScriptContext `+0x28` is a **double execution-time accumulator**, not a
+>    C-stack base/limit.
+> 3. The shutdown deadline lives in a **sub-object at `ctx+0x4b8`** (`+0x38`
+>    deadline, `+0x40` bit0 shutdown-started), i.e. `ctx+0x4f0`/`ctx+0x4f8`
+>    context-relative — the `+0x38/+0x40` rows below were that sub-object's
+>    fields.
+
 ## ScriptContext / VM lane
 
 | Offset | Type | Meaning |

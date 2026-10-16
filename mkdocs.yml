@@ -62,6 +62,7 @@ nav:
       - Luau scripting: scripting-luau.md
       - Luau VM lifecycle: luau-vm-lifecycle.md
       - Luau VM encodings: luau-vm-encodings.md
+      - Inside the Luau interpreter: luau-interpreter.md
   - Scheduler:
       - Job scheduler: job-scheduler.md
       - Scheduler internals: scheduler-internals.md

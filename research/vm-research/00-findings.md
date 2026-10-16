@@ -17,31 +17,40 @@ Companion files: `opcode-map.csv` (all 93 opcodes, verified) · `dump-crosscheck
 ## Execution path
 
 ```
-asset bytes ──▶ FUN_1014bb465        integrity gate
-                FUN_1014b91b5        container decoder (magic -0x1ff6cda4b5ef85ae,
-                                     XOR-key rebuild, "RSB1", decompress 0x1032844e2)
-                sub_101593650        compilation cache ("Compilation_Cache_Key_Address")
-                LuaVMLoad 0x1029a9f36 ──▶ luaD_rawrunprotected 0x102995084
-                luau_load 0x1029aa05a     decode opcodes (see below) ──▶ Proto + Closure
-                        │
-                ScriptContext::startScript 0x10158afe8   (policy gate sub_10159502e,
-                        │    re-entrancy ≤ 3, "Script Start" scope, record sub_10158cc58)
-                sub_1015a81a8  enqueue into scheduler
-                        │
-                SchedulerFacet::resumeWaitingScripts 0x1015a8d94   (lock R15+0xf8,
-                        │    pop from queue R15+0xd8, deadline 0x102f7eb5e)
-                FUN_101555d98  per-script resume (alive-check 0x10299fd1e, scope 0x1015c6549)
-                ScriptContextResume 0x1015566d6   (result 0=done, 1=yield, 6=error)
-                FUN_101556cb4  C-stack guard ≤200, shutdown-deadline check, CPU accounting
-                        │
-                ┌─ fresh ─▶ lua_resume 0x102995af5        (pre-hook global+0x6a0,
-                │             luaD_rawrunprotected(…, FUN_102995c18, L->top−nresults*16),
-                │             post-hook global+0x640)
-                └─ error ─▶ lua_resumeerror 0x102995dc4   (walks ci chain for flags&2)
-                        │
-                resume loop 0x102996328 ──▶ luau_execute 0x1029adfd3
-                                            └─ Path A or Path B (see Interpreter)
+asset bytes ──▶ FUN_1014b91b5        container decoder (RSB1; see the section below)
+                 sub_101593650        compilation cache ("Compilation_Cache_Key_Address")
+                 LuaVMLoad 0x1029a9f36 ──▶ luaD_rawrunprotected 0x102995084
+                 luau_load 0x1029aa05a     ──▶ FUN_1014bb465 integrity gate (on the
+                         │                     decoded LBC blob, see below)
+                         │                 decode opcodes (see below) ──▶ Proto + Closure
+                         │
+                 ScriptContext::startScript 0x10158afe8   (policy gate sub_10159502e,
+                         │    re-entrancy ≤ 3, "Script Start" scope, record sub_10158cc58)
+                 sub_1015a81a8  enqueue into scheduler
+                         │
+                 SchedulerFacet::resumeWaitingScripts 0x1015a8d94   (lock R15+0xf8,
+                         │    pop from queue R15+0xd8, deadline 0x102f7eb5e)
+                 FUN_101555d98  per-script resume (alive-check 0x10299fd1e, scope 0x1015c6549)
+                 ScriptContextResume 0x1015566d6   (result 0=done, 1=yield, 6=error)
+                 FUN_101556cb4  C-stack guard ≤200, shutdown-deadline check, CPU accounting
+                         │
+                 ┌─ fresh ─▶ lua_resume 0x102995af5        (pre-hook global+0x6a0,
+                 │             luaD_rawrunprotected(…, FUN_102995c18, L->top−nresults*16),
+                 │             post-hook global+0x640)
+                 └─ error ─▶ lua_resumeerror 0x102995dc4   (walks ci chain for flags&2)
+                         │
+                 resume loop 0x102996328 ──▶ luau_execute 0x1029adfd3
+                                             └─ Path A or Path B (see Interpreter)
 ```
+
+**Pipeline correction (was wrong here earlier):** the "integrity gate"
+`FUN_1014bb465` is NOT a pre-decoder step — its only caller is `luau_load`
+(`0x1029aa05a`), which invokes it as `FUN_1014bb465(L, chunkname, data, size)`
+on the already-decoded LBC blob *before* deserialization, and only proceeds
+when it does not return 1. It is an obfuscated predicate (VMP-style opaque
+arithmetic with table lookups at `DAT_10621fa9c`/`DAT_10621faa6`); on its
+failure path it clears bit 30 of `*(L + 0x18) + 0x630`. The container decode
+itself happens in `FUN_1014b91b5` before `LuaVMLoad` is ever called.
 
 `startScript` also logs `[FLog::ScriptContext] Running script %p`; `ScriptContextResume`
 logs `Resuming script: %p` and `Pending script name: %s`. On load failure the error goes
@@ -133,6 +142,58 @@ produces a wrong `field_addr` and therefore garbage — the offsets below are ve
 Separately, `global_State` carries a keyed pointer-encryption table — `ptrenckey[4]` at
 `global+0x06B8` (plus `ptrenckeynew[8]` at `+0x49F0`, `ptrencactive` at `+0x4A30`).
 `lua_State.stacksize` participates in it; the `Proto` debug fields above do not.
+
+---
+
+## The RSB1 script container (`FUN_1014b91b5` @ `0x1014b91b5`)
+
+The decoder takes a `std::string` (Apple libc++ layout: size/flag byte `@0`,
+inline data `@+1`, size `@+8`, heap ptr `@+0x10`), requires length ≥ 9, and
+chooses one of three paths. Callers: `FUN_1014c83e8` (`require`),
+`sub_101593650` (compilation cache), `FUN_1015890ee`, `FUN_10158d468`,
+`FUN_101549288`, `FUN_1015925f4`. The result always goes to `LuaVMLoad`
+(`0x1029a9f36`) as `(L, chunkname, bytes, size, env)`.
+
+**Path A — plain bytecode blob.** Raw `W[0..7] == 0xE009325B4A107A52`
+(= the K=0 scramble of `"RSB1"+0xFFFFFFFF`, byte-verified) → load `W[8..N)`
+verbatim. The binary additionally gates the direct branch on `DAT_10752bd48`,
+but both sub-paths load the same bytes.
+
+**Path B — scrambled container.**
+
+```
+key[i]      = (W[i] ^ "RSB1"[i]) - i*0x29          (mod 256; SIMD: PXOR 0x106207660,
+                                                    PADDB 0x106207670 = (0,-0x29,-0x52,-0x7B))
+plain[p]    = W[p] ^ (uint8)(key[p & 3] + p*0x29)  (whole buffer, descrambled in place)
+checksum    = XXH32(plain, seed 0x2A)              (FUN_103222533 — plain standard xxHash32)
+verify      checksum == key as LE u32              (CMP EAX, R14D @ 0x1014b9413)
+plain[0..3] = "RSB1"                               (0x31425352; re-written by the code)
+plain[4..7] = u32 LE decompressed size
+  size == 0                        → payload = plain[8..N) (plain bytecode)
+  u32 at plain[8..11] == 0xFD2FB528 → payload = zstd_decompress(plain[8..N), expect size)
+  otherwise                        → error 3
+```
+
+The descrambler `FUN_1014bae23` is expressed in the binary as: build a
+16-byte keystream `ks[j] = key[j&3] + j*0x29`, XOR 16-byte blocks, bump every
+keystream byte by `+0x90` per block (16·0x29 ≡ 0x90 mod 256) — algebraically
+identical to the scalar formula above; the tail uses the same formula.
+
+**The security trick:** the scramble key IS the xxHash32 checksum of the
+plaintext. The key is recoverable from the scrambled bytes alone because the
+first four plaintext bytes are the known constant `"RSB1"` — the derivation is
+a tautology that exactly reconstructs the embedded key for any container. No
+secret, nothing to brute-force; the checksum then authenticates the whole
+payload. (This is the "shuffle/encryption" of script bytecode in this build.)
+
+**zstd wrapper** `FUN_1032844e2` (`0x1032844e2`): create-dctx → decompress →
+free-dctx; success requires the decompressed size to equal the `plain[4..7]`
+field exactly. Allocation for the output happens in the caller via
+`FUN_10064f530`.
+
+Reproduced and tested in `../vm-repro/` (tools: `rbxrsb1 info|key|decode|encode`);
+the checksum was verified by executing the binary's own machine code for
+`FUN_103222533` over a 1000+-case sweep.
 
 ---
 
@@ -367,6 +428,64 @@ Alloc size `len + 0x19` (`luaS_newlstr` = `0x1029a06d3`, which also shows the `h
 
 ---
 
+## Interpreter internals (Path B) — verified from the handlers
+
+The register-machine loop was walked handler-by-handler; the full guided tour
+lives in `../roblox-macplayer-internals/docs/luau-interpreter.md`. Findings
+that correct or extend the layouts above:
+
+### TValue layout (correction — not previously documented)
+
+```text
+offset  0        8        12   13      14
+        value(8) | vec z  | tt | marked| memcat     (16 bytes total)
+```
+
+- `value` = double, GC pointer, or **three floats** (this build uses
+  3-component vectors — `LUA_VECTOR_SIZE = 3` — which is why the tag sits at
+  byte 12).
+- The tag is read/written as a **dword at +0xc** (`LOADN` writes `0x3`;
+  `GETTABLEKS`/`NAMECALL` compare the whole dword).
+- Type tags are **renumbered**: `STRING = 6`, `TABLE = 7`, `FUNCTION = 8`
+  (open-source: 5/6/7). `NIL/BOOLEAN/NUMBER` match upstream (0/1/3).
+  Handlers mask tags with `& 0xf` — the tag byte's high nibble carries flags.
+- `LuaNode` = `{ TValue val @0; TValue key @16 }` — **val first** (upstream is
+  key-first), 32-byte stride confirmed by the slow-path slot arithmetic
+  (`(node - nodes) >> 5`).
+
+### Register map (Path B)
+
+| Reg | Holds |
+|-----|-------|
+| `R10` | `L->base` (register file; reg N at `base + N*16`) |
+| `R11` | `pc` (current instruction word) |
+| `R15` | dispatch table `0x1072d9230` |
+| stack | `cl` (`[rbp-0x60]`), `k` (`[rbp-0x48]`), `L` (`[rbp-0x30]`) |
+
+Dispatch = `jmp [table + opbyte*8]`; handlers tail-jump to the next handler
+(no C stack use between instructions). Protected operations save `pc` to
+`ci->savedpc` and re-enter through shared helpers.
+
+### Confirmed in vivo
+
+- **Pointer encodings in the hot path**: `NAMECALL` decodes the encoded
+  `TString.hash` (`real = field_addr + stored`) on every execution; `CALL`
+  decodes the encoded `lua_State.stacksize` (`stored ^ (uint32)&field`).
+- **Inline caches write back into the instruction stream**: the `GETTABLEKS`
+  slow path stores the found slot into the instruction's `C` byte
+  (`mov [r12+3], dl` where `r12 = pc`); `NAMECALL` does the same. `GETIMPORT`
+  caches the resolved import **in the Proto's constant table** (first
+  execution resolves, later ones are a 16-byte copy guarded by `env->safeenv`).
+- **CALL/RETURN** confirm the `CallInfo` layout above (stride `0x30`,
+  `base/top/p/func/savedpc/nresults/flags` at `0/8/0x10/0x18/0x20/0x28/0x2c`),
+  the frame nil-fill between `top` and `base + stacksize*16`, the
+  `flags & RETURN(1)` VM-exit boundary, and the `__call` retry path
+  (`0x1029add42` rewrites reg[A] and the handler re-executes).
+- **GC at loop backedges**: `FORNLOOP` calls `luaC_step` (`0x102996c06`)
+  behind a flag before running the iteration.
+
+---
+
 ## `task.*` library
 
 Registered by `task_lib_init` (`0x1014cebe0`). These are the corrected addresses (the community
@@ -394,6 +513,11 @@ current or dead thread (`cannot cancel thread`), else `lua_resetthread` or sched
 - **Userdata `metatable`** is taken as VMValue4 by the community dump and is consistent with the
   other VMValue4 fields, but the individual read site was not isolated.
 - **`ci+0x28`** is read as `nresults`; whether it packs additional state is unconfirmed.
-- **Asset-pipeline callers** of the container decoder (`FUN_1015890ee`, `FUN_10158d468`,
-  `FUN_1014c83e8` [require], `FUN_101549288`, `FUN_1015925f4`, `0x1015a9249`) not fully traced.
-- **`FUN_1014bb465`** integrity-gate internals not documented.
+- **Alternate decoder branch** (`FUN_1014b96b3`, taken when `DAT_10752c0a0 != 0`) not yet
+  analyzed; the main paths above are fully characterized.
+- **`FUN_1014bb465`** is characterized functionally (obfuscated predicate called from
+  `luau_load` on the LBC blob; failure clears bit 30 at `*(L+0x18)+0x630`) but the obfuscated
+  arithmetic (opaque expressions over `DAT_10621fa9c`/`DAT_10621faa6` lookups) is not deobfuscated.
+- ~~Asset-pipeline callers of the container decoder~~ resolved: `FUN_1014c83e8` (`require`),
+  `sub_101593650` (compilation cache), `FUN_1015890ee`, `FUN_10158d468`, `FUN_101549288`,
+  `FUN_1015925f4` (confirmed via xrefs).

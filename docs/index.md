@@ -142,7 +142,10 @@ The slots do not follow public Luau `LOP_*` order: the byte on disk is
 on is `T[wire]`, for a 256-byte permutation `T` at `0x1063bb686`. The
 full opcode map, and the address-relative pointer encodings the VM applies
 to some object fields, are in
-[Luau VM encodings](luau-vm-encodings.md).
+[Luau VM encodings](luau-vm-encodings.md). For a guided tour of the
+interpreter itself — the register machine, call frames, the method-call and
+inline caches, and a real script followed instruction by instruction — see
+[Inside the Luau interpreter](luau-interpreter.md).
 
 The public name `lua_pcall` is absent, but protected execution is present:
 `luaB_pcall` (`0x10298b913`), `luaB_pcallrun` (`0x10298b946`),
