@@ -24,6 +24,9 @@ RunService, and the RbxTransport networking layer.
 | File | Contents |
 |------|----------|
 | **`vm-research/luau-vm.md`** | **The Luau VM deep dive** — opcode encoding, pointer-encoding scheme, interpreter internals, verified object layouts, and the full script-execution address map. Start here for anything VM-related. |
+| **`vm-research/scriptcontext.md`** | **The ScriptContext layer** — resume pipeline and guard (200-limit, shutdown deadline, time accounting), result-code mapping, facet gates, `startScript` admission chain, the compilation-cache load step, and the `require` module state machine. |
+| **`vm-research/networking.md`** | **RakNet datagram crypto & framing** — ChaCha20-Poly1305 (custom framing: 8-byte-nonce payload state, GCM-style length blocks in the MAC), the "UniqueNumber" nonce, asymmetric trailer formats per direction, directional keys, the Rupp handshake (RbxOpenRequest2/Reply2), DHF partial layout, and the open wire-format targets. |
+| **[`vm-repro/`](../vm-repro/)** | **C++ reproduction** of the verified internals — opcode tables, disassembler, RSB1 container pipeline, ScriptContext state machines, RakNet AEAD, LBC chunk reader, each with tests. See the [tooling page](../docs/repro-tooling.md). |
 | **`vm-research/opcode-map.csv`** | All 93 opcodes, verified: canonical / wire / vmop numbers, aux flag, and both interpreter handler addresses. |
 | **`vm-research/dump-crosscheck.txt`** | Per-symbol verification status of the community (`Pibbly`) offset dump. |
 | **`RobloxPlayer_RE_Report.md`** | The original broad reverse-engineering report (12 sections). |

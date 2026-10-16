@@ -350,6 +350,23 @@ C `nupvalues*16 + 0x30`.
 Alloc size `len + 0x19`. `luaS_newlstr` (`0x1029a06d3`) shows the hash
 encoding directly: `stored = hash − (ts + 0x10)`.
 
+### `TValue` — a single Lua value (16 bytes)
+
+```text
+offset  0        8        12   13      14
+        value(8) | vec z  | tt | marked| memcat
+```
+
+The value slot holds a `double`, a heap pointer, or **three floats** — this
+build uses 3-component vectors, which is why the type tag sits at byte 12.
+Handlers read and write the tag as a **dword at `+0xc`** (tag plus the
+`marked`/`memcat` bytes). The type tags themselves are renumbered in this
+build: `STRING = 6`, `TABLE = 7`, `FUNCTION = 8` (open-source Luau uses
+5/6/7); `NIL/BOOLEAN/NUMBER` match upstream (0/1/3), and handlers mask tags
+with `& 0xf` before comparing, so the high nibble carries flags. Verified
+from the `LOADN`, `GETTABLEKS` and `NAMECALL` handlers — see
+[Inside the Luau interpreter](luau-interpreter.md).
+
 ### `LuaTable` — size `0x30`
 
 | Off | Field |

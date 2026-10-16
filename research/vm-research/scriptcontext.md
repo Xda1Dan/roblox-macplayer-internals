@@ -268,8 +268,17 @@ Additional rules verified in the entry path:
 
 ## Unknowns (kept honest)
 
-- **Who writes the phase counters** `ctx+0xa18` / `lane+0x12a0` (the facet
-  gates) — a shutdown-phase writer exists but was not located.
+- **Phase-counter writer — resolved by cross-reference**: the repo's
+  script-execution notes traced the facet state machine `0x101545276`,
+  which moves the `+0x12a0` counter through `1 -> 2 -> 3` during
+  destruction (destroying the sub-context at `+0x180`, then closing the
+  facet). This confirms the gates' polarity: `>= 3` means destroyed, so
+  the fatal `"Invalid Facet Access"` on access is by design, not a bug in
+  our reading. A second accessor with the same shape exists at
+  `0x1055d5e74` (returns `context+0xdc0` while the phase is below 3) —
+  a different facet object gated on the same destruction state machine.
+  The `+0xa18` counter's writer is presumably the same state-machine
+  family, not yet individually confirmed.
 - The **identity getters** (vtable `+0x2c0`/`+0x2c8`) and the `DAT_10752bfe8`
   "new mode" pair variant were not followed into the implementing classes.
 - `require`'s state transitions during a *run* (who moves a module 3 → 1/2)

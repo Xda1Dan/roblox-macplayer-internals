@@ -21,7 +21,11 @@ SHA-256 `ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47`.
 | Service roster, facet and method names, Luau markers, log lines | String table (883k entries), 761 log channels |
 | Hidden engine symbols | Shipped symtab: 2275 entries, no Lua, DataModel, or net code symbols; mostly standard-library type names |
 | Opcode numbering, pointer encodings, VM object layouts | Binary tables `T` (`0x1063bb686`) / `R` (`0x10648bb74`) and the decoder code `luaF_freeproto` (`0x102996918`), `Proto.source` decode (`0x102993f3c`) — see the [Luau VM encodings](luau-vm-encodings.md) page |
-| Deep Luau pillar semantics (GC, full interpreter bodies) | Public Luau source as a reference, not a binary fact |
+| Interpreter handlers (CALL/RETURN/NAMECALL/GETIMPORT/FASTCALL/...), TValue layout, renumbered type tags, inline caches | Handler disassembly — see [Inside the Luau interpreter](luau-interpreter.md); the builtins table `0x1072d74e0` was cross-checked against compiled one-liners from the reference compiler |
+| Script containers (RSB1): scramble, key recovery, XXH32 checksum, zstd payload | `FUN_1014b91b5` decode path, `FUN_103222533` checksum (its machine code was extracted and executed against the reproduction across a 1000+-case sweep) |
+| ScriptContext resume guard, admission chain, `require` state machine | `FUN_101556cb4`, `sub_10159502e`, `FUN_1015c4980`, `FUN_10144ef5e`, `sub_10158dd88` — see `research/vm-research/scriptcontext.md` |
+| RakNet datagram encryption (ChaCha20-Poly1305, custom framing) | `FUN_102d94458` (decrypt), `FUN_102d93dba`/`FUN_10293f84` (encrypt), primitives `FUN_101825740`/`FUN_10182539e` — see `research/vm-research/networking.md` |
+| LBC serialized-chunk format | Parsed and cross-validated against the reference `luau_load` (the reproduction's chunk reader reproduces its output exactly) |
 | Service membership | Binary names plus public Roblox API docs, labeled where used |
 
 ## Limits
@@ -35,10 +39,14 @@ These are unknowns, not oversights:
   tunables were not established.
 - Struct offsets such as `+0x778` belong to this build only and move
   between versions.
-- `luau_execute` (`0x1029adfd3`) is a dispatch stub (singlestep check plus
-  opcode jump table). The 93 slots, the `wire -> vmop` permutation, and the
-  per-slot handler addresses are mapped in
-  [Luau VM encodings](luau-vm-encodings.md); the individual opcode
-  bodies are not summarized here.
-- Exact wire formats, helper names behind internal calls, and per-build
-  tunable values are not claimed.
+- The important opcode bodies (CALL/RETURN/NAMECALL/GETTABLEKS/GETIMPORT/
+  FASTCALL/FORNLOOP and the entry/dispatch machinery) are now covered in
+  [Inside the Luau interpreter](luau-interpreter.md); the remaining handlers
+  (SETLIST/CONCAT/string builders, vector arithmetic, the debug interpreter
+  Path A) are not yet handler-by-handler.
+- The script-container wire format (RSB1) and the datagram encryption are
+  now documented (see the research notes); the *replication* message
+  payloads (the per-message field codecs behind ids `0x81/0x83/0x86`) and
+  the RakNet datagram header bit layout are still not claimed.
+- Helper names behind internal calls and per-build tunable values remain
+  unmapped.
