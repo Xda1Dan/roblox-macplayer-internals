@@ -1,5 +1,5 @@
 // scramble.hpp — the opcode-numbering scrambles of RobloxPlayer (macOS) build
-// <PHONE> (MacPlayer-version-f9247f9560044102).
+// MacPlayer-version-f9247f9560044102 (Luau 0.742.0.7421053).
 //
 // Verified scheme (see ../research/vm-research/luau-vm.md "Opcodes: three numberings"):
 //
