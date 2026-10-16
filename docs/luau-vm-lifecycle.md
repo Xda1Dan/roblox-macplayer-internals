@@ -27,6 +27,30 @@ selective pointer hardening (string-reference hardening)
 
 ---
 
+## The load boundary in detail
+
+The wrapper (`LuaVMLoad`, `0x1029a9f36`) runs a GC step if memory is tight,
+then **suspends the GC entirely** (`GCthreshold = -1`) for the duration of
+the load — a chunk can never be interrupted by a collection mid-deserialize.
+The deserializer (`luau_load`, `0x1029aa05a`) then runs protected via
+`luaD_rawrunprotected`, and the threshold is restored afterwards.
+
+Inside `luau_load`, after the version checks and the integrity gate
+(`FUN_1014bb465`), each proto's code words are bulk-copied from the stream
+and then rewritten **wire → vmop in place** (table `T` at `0x1063bb686`,
+stepping by `getOpLength(R[vmop])`). After all protos are loaded, a single
+pass walks every proto's instructions and swaps table ops to their userdata
+variants when the referenced string constant has an assigned **atom**:
+`GETTABLEKS→GETUDATAKS`, `SETTABLEKS→SETUDATAKS`, `NAMECALL→NAMECALLUDATA`
+(vmop swaps `0x78→0x8d`, `0xec→0x7f`, `0xba→0x58`). The atom is fetched
+through a hook at `global+0x658` and cached in the string's `+0x06` field.
+This is what makes userdata field access faster than a generic table lookup.
+
+The full deserialization sequence (string table, proto fields, constants,
+line info, feedback slots) matches the reference `lvmload.cpp` shape; the
+research notes cover the Roblox deviations (integrity gate, wire→vmop
+rewrite, GC suspension).
+
 ## 1. lua_newstate - 0x10299fd5b
 
 **What it does:** allocates a `0x4d60`-byte Luau state through the

@@ -197,6 +197,120 @@ the checksum was verified by executing the binary's own machine code for
 
 ---
 
+## `luau_load` end to end (`LuaVMLoad 0x1029a9f36` → `luau_load 0x1029aa05a`)
+
+The load boundary is two functions: a thin GC-managing wrapper and the
+deserializer proper.
+
+### `LuaVMLoad` (`0x1029a9f36`) — the wrapper
+
+```c
+int LuaVMLoad(L, chunkname, data, size, env) {
+    save = global->GCthreshold;              // +0x08 in global_State
+    if (save <= global->totalbytes)          // +0x10 — memory is tight
+        luaC_step(L, 1);                     // GC before we start
+    global->GCthreshold = -1;                // suspend GC during load
+    status = luaD_rawrunprotected(L, luau_load, &args);
+    if (status == 4) {                       // LUA_ERRMEM
+        pusherror(L, "not enough memory");
+        result = 1;
+    }
+    free temp buffers (string table, proto table);
+    global->GCthreshold = save;              // resume GC
+    return result;
+}
+```
+
+The load runs with the GC **disabled** — a chunk can't be interrupted by a
+collection mid-deserialize. The wrapper catches memory errors and turns them
+into a Lua error value.
+
+### `luau_load` (`0x1029aa05a`) — the deserializer
+
+The body follows the reference `lvmload.cpp` shape with two Roblox
+additions. In order:
+
+1. **Chunkname prep** (`"%s%.*s"` via a 256-byte chunkid buffer), then the
+   **version checks**: version byte `0` means the rest of the blob is an
+   error message; versions outside `[3..14]` and `100` are rejected;
+   type-versions outside `[1..3]` are rejected (for version >= 4).
+2. **Integrity gate** — `FUN_1014bb465(L, chunkname, data, size)`; a return
+   of 1 short-circuits everything.
+3. **String table** — varint count, then varint-length-prefixed strings.
+   For type-version 3, the userdata remap table follows (index/name pairs
+   terminated by 0).
+4. **Proto loop** (varint count), per proto:
+   - version >= 12: varint byte-size of the proto section (unknown tail
+     skipped by seeking)
+   - `maxstacksize`, `numparams`, `nups`, `is_vararg` (4 bytes)
+   - version >= 4: `flags` byte + type info blob (varint size + bytes,
+     with userdata remap for type-version 3)
+   - **code array**: varint word count, allocate, bulk-copy the u32 words
+     — then the **wire→vmop rewrite pass** (below)
+   - **constants**: varint count, each a tag byte + payload (the full
+     LBC_CONSTANT set through `VECTORD`)
+   - child proto ids (varint each), `linedefined`, `debugname` (string id)
+   - line info (gap-log2 + per-instruction deltas + absolute intervals)
+   - debug info (locals, upvalue names)
+   - version >= 11: feedback vector slots; version >= 12: cost (if
+     inlinable)
+5. **Atom rewrite pass** — after all protos are loaded, a single pass walks
+   every proto's code array (via `getOpLength(R[vmop])` steps) and swaps
+   table ops to their userdata variants when the referenced string constant
+   has an assigned atom:
+
+```c
+// from the decompile; op bytes are vmops at this point
+if (op == 0x78)      newOp = 0x8d;   // GETTABLEKS(120) → GETUDATAKS(141)
+else if (op == 0xec) newOp = 0x7f;   // SETTABLEKS(236) → SETUDATAKS(127)
+else if (op == 0xba) newOp = 0x58;   // NAMECALL(186) → NAMECALLUDATA(88)
+
+if (AUX < 0x10000) {                 // only if the constant fits 16 bits
+    k = &constants[AUX];
+    if (k->atom == SHRT_MIN)         // unassigned (-0x8000)
+        k->atom = global->scb.updateatom   // the atom hook at global+0x658
+                    ? hook(L, &k->data, k->len) : -1;
+    if (k->atom >= 0)
+        insn = (insn & 0xffffff00) | newOp;  // swap the opcode byte
+}
+```
+
+   The vmop values cross-check against `opcode-map.csv` exactly
+   (`GETTABLEKS` vmop 120 = 0x78, `GETUDATAKS` vmop 141 = 0x8d, etc.).
+   After this pass, string-keyed table access on userdata uses the atom-
+   specialized handlers (which are faster and hook into the userdata
+   property cache).
+
+6. **Wire→vmop rewrite** — a separate pass *per proto*, immediately after
+   the code words are bulk-copied (before constants are read):
+
+```c
+for each instruction (stepping by getOpLength(R[vmop])):
+    vmop = T[wire_byte];             // T at 0x1063bb686
+    code[j] = vmop;                  // in place
+    j += getOpLength(R[vmop]);       // R at 0x10648bb74
+```
+
+   This is the in-place rewrite documented in the encodings page; the
+   deserializer is *where* it happens (not the container decoder — by the
+   time `luau_load` runs, the bytes are already wire ops inside a
+   fully-decoded LBC stream).
+
+7. **Main closure** — varint `mainProtoId`, `luaF_newLclosure(L, 0, env,
+   main)`, push. The caller gets the closure on the stack.
+
+### Roblox deviations from the reference
+
+| | reference `lvmload.cpp` | this build |
+|---|---|---|
+| integrity gate | none | `FUN_1014bb465` before deserialization |
+| opcode numbering | canonical throughout | wire in the stream → vmop in memory (rewrite pass per proto) |
+| atom rewrite | `luaS_updateatom` in a post-load pass | same shape; the hook is at `global+0x658`, unassigned sentinel is `SHRT_MIN` |
+| GC during load | runs normally | suspended (`GCthreshold = -1`), one step before if memory is tight |
+| error on version 0 | pushes the rest as an error string | same |
+
+---
+
 ## Interpreter: two copies
 
 Luau is a C++ template on a `SingleStep` flag, so the binary contains **two** full interpreters.
