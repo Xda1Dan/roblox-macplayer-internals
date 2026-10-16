@@ -200,22 +200,102 @@ but not yet pinned to roles.
   (`length <= 2 || buffer == 0`, `dhf.isValid==false`,
   `congestionManager->OnGotPacket failed`).
 
+### Key management
+
+The encrypt/decrypt paths read 32-byte session keys from two locations:
+
+**Key bank** — a 0x140-byte crypto context object, pointed to by
+`relObj+0x20`, with nine 32-byte slots at `+0x20..+0x140` (zeroed by
+`FUN_102d93065` at init). The encrypt path reads from three slots
+selected by rekey flags at `relObj+0x28/+0x2c`:
+
+```
++0x28 == 0: encrypt uses key bank +0xc0
++0x28 == 1, +0x2c == 0: encrypt uses key bank +0xe0
++0x28 == 1, +0x2c == 1: encrypt uses key bank +0x120
+```
+
+The decrypt path uses a rekey-aware wrapper (`FUN_102d93ea4`) that sets
+`+0x2c = 1` when the bit at `+0x28` is set — switching from slot `+0xe0`
+to `+0x100` — before calling the AEAD primitive.
+
+**Direct keys** — 32-byte slots at `relObj+0x40` (encrypt) and
+`relObj+0x60` (decrypt), used by the simpler wrappers
+(`FUN_102d93f84` / `FUN_102d94016` / `FUN_102d94458`) when
+`relObj+0x2b == 0` and `relObj+0x2a == 1`.
+
+**Population** — `FUN_102d5368e` populates the key bank from four
+sources: either hardcoded 32-byte keys (when no config is present) or
+config-sourced keys via four named FVars. The hardcoded keys are
+embedded in the function (constants at stack offsets). A helper
+(`FUN_102d53e28` → `FUN_10253e5e`) copies two `std::string`-held keys
+into the first two key bank halves.
+
+**Crypto library** — libsodium-derived:
+- X25519 scalar mult: `FUN_101f499e0` (CRYPTOGAMS x86-64 assembly at
+  `FUN_101f49a20`, zero-output small-order check via `FUN_101fd63a0`),
+  wrapped by OpenSSL's `ossl_ecx_compute_key` (`FUN_101f6ba90`)
+- BLAKE2b IV constants at `0x1062512f0`
+- AEAD primitives: `FUN_101825740` (decrypt) / `FUN_10182539e` (encrypt)
+  with GHASH-style MAC (poly1305-donna-32 core `FUN_101835607`) and
+  ChaCha20 keystream (`FUN_10183c095`, constants "expand 32-byte k")
+- Algorithm names: `"curve25519"` (`FUN_101838aea`), `"x25519blake2b"`
+  (`FUN_10183512a`)
+- Init: `"LibsodiumDRG"` nonce in `FUN_10183c75e`
+
+**The X25519 → session-key derivation call path is not traced.** The
+EVP interface dispatches through function pointers, leaving no direct
+call sites in the stripped binary. The likely construction (standard
+libsodium `crypto_kx` pattern: BLAKE2b keyed with the shared secret,
+hashing both public keys concatenated, producing 64 bytes = two
+32-byte directional keys) is consistent with the dual-key layout but
+not confirmed from static analysis.
+
 ---
 
 ## Unknowns (next session's targets)
 
-1. **DHF bit-exact semantics** — resolve the control-path fields (+0x00,
-   +0x0c, +0x18) and the data-path flags (+0x11/+0x13/+0x14/+0x1a/+0x1b) by
-   reading the send-side DHF writer (in the reliability-layer send path) and
-   cross-checking against stock RakNet 4.x DHF.
+1. **DHF bit-exact semantics** — partially resolved. The parser
+   (`FUN_102d82612`) and the sequence reader (`FUN_102d82b92`, a 24-bit
+   big-endian read at a byte-aligned position) are mapped. The remaining
+   ambiguity is the *semantics* of the control-path fields (`+0x00`,
+   `+0x0c`, `+0x18`) and the data-path flags (`+0x11/+0x13/+0x14/+0x1a/
+   +0x1b`) — the bit positions are known but which stock-RakNet field
+   each maps to needs the send-side writer confirmed.
+1b. **Key-derivation chain** — partially traced (see the key-management
+   section below). The X25519 → session-key path goes through OpenSSL's
+   EVP function-pointer dispatch, which doesn't leave direct call sites
+   in a stripped binary. The key bank structure, key slots, rekey
+   mechanism, and crypto library identification are documented.
+1c. **Key derivation KDF** — the X25519 scalar mult is confirmed
+   (`FUN_101f499e0` calling CRYPTOGAMS x86-64 assembly at
+   `FUN_101f49a20`, with a zero-output small-order check via
+   `FUN_101fd63a0`). BLAKE2b is present (IV constants at
+   `0x1062512f0`). The exact KDF construction (likely BLAKE2b keyed
+   with the shared secret, hashing the two public keys — the standard
+   libsodium `crypto_kx` pattern) is not confirmed from static
+   analysis alone.
 2. **Reliable-message frame header** — per-message flags (reliable/sequenced/
    ordered/split), 24-bit sequence numbers, split-packet header (count/index)
    inside the 45KB core (`FUN_102d84b6e`, 45,851-byte decompilation — needs
    targeted slicing).
 3. **ACK/NAK wire format** — the compact cumulated-ACK encoding.
-4. **Key-derivation chain** — Rupp X25519 shared secret → the two directional
-   session keys (+0x40/+0x60) and the key-bank slots (+0xc0/+0xe0/+0x120);
-   includes the rekey handshake that flips `relObj+0x28`.
+4. **Key-derivation chain** — partially traced. The X25519 scalar
+   multiplication exists in the binary through two paths: an OpenSSL
+   EVP interface (`ossl_ecx_compute_key` in `FUN_101f6ba90`, reached
+   through EVP function pointers) and CRYPTOGAMS x86-64 assembly
+   (`FUN_101f49a20`). The crypto library is libsodium-derived
+   (`BLAKE2b` constants at `0x1062512f0`, `curve25519` and
+   `x25519blake2b` algorithm names). The key bank is a 0x140-byte
+   crypto context with nine 32-byte slots (`+0x20..+0x140`),
+   initialized by `FUN_102d93065` and populated by `FUN_102d5368e`
+   from config-sourced keys or four hardcoded defaults. The encrypt
+   path reads from three key-bank slots (`+0xc0/+0xe0/+0x120`),
+   selected by the rekey flags at `relObj+0x28/+0x2c`. **The exact
+   X25519 → session-key derivation call path is not traced** — it goes
+   through the EVP function-pointer dispatch, which doesn't leave
+   direct call sites in a stripped binary. Dynamic analysis (running
+   the binary under a debugger) would close this gap.
 5. **The `0x12`-byte Rupp pre-header** skipped in `ProcessNetworkPacket`
    (`param_9`) for reverse-endpoint sockets — layout not yet dumped.
 6. **Rupp TLV schema** (`TokenTlv::Token`) for the open-request/reply payloads.
