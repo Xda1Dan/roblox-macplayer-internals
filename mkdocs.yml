@@ -74,6 +74,7 @@ nav:
       - Objective-C bridge: objc-bridge.md
   - Reference:
       - Examples: examples.md
+      - Reproduction tooling: repro-tooling.md
       - Evidence and limits: evidence-ledger.md
 
 markdown_extensions:

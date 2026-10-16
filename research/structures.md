@@ -3,7 +3,7 @@
 Field layouts recovered from decompilation. All offsets are from the object base.
 
 > **Corrections (2026-10):** three fields in this file were corrected by the
-> ScriptContext deep dive (`vm-research/01-scriptcontext.md`):
+> ScriptContext deep dive (`vm-research/scriptcontext.md`):
 > 1. The "lifecycle level ≥ 3" facet gates are the **reverse**: the facet
 >    (`ctx−0x888`) and scheduler queue (`lane+0xac0`) are valid while the phase
 >    counter (`ctx+0xa18` / `lane+0x12a0`) is **< 3**; `≥ 3` is a fatal

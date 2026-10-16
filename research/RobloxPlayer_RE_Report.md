@@ -6,7 +6,7 @@
 
 > **Status — early report.** This was the first pass over the binary and is kept for history. Where
 > it disagrees with the later verified write-ups it is superseded by those (`docs/` and
-> `vm-research/00-findings.md`). Two figures below are stale: the function count was a
+> `vm-research/luau-vm.md`). Two figures below are stale: the function count was a
 > partial-analysis snapshot, and after full auto-analysis the image has **~549,782 functions**, not
 > ~2,518. Corrected offsets live in `offsets.md` and `vm-research/`.
 

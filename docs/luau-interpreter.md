@@ -492,8 +492,8 @@ build's enum (between `VECTOR` and `STRING`) is not yet identified.
 
 ## Do it yourself
 
-Every claim above is reproducible with the tooling in `vm-repro/`
-(see the repository root's `README` for the build):
+Every claim above is reproducible with the tooling in
+[`vm-repro/`](repro-tooling.md):
 
 ```sh
 # compile Lua with the version-matched reference compiler

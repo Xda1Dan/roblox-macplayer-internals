@@ -23,7 +23,7 @@ RunService, and the RbxTransport networking layer.
 
 | File | Contents |
 |------|----------|
-| **`vm-research/00-findings.md`** | **The Luau VM deep dive** — opcode encoding, pointer-encoding scheme, interpreter internals, verified object layouts, and the full script-execution address map. Start here for anything VM-related. |
+| **`vm-research/luau-vm.md`** | **The Luau VM deep dive** — opcode encoding, pointer-encoding scheme, interpreter internals, verified object layouts, and the full script-execution address map. Start here for anything VM-related. |
 | **`vm-research/opcode-map.csv`** | All 93 opcodes, verified: canonical / wire / vmop numbers, aux flag, and both interpreter handler addresses. |
 | **`vm-research/dump-crosscheck.txt`** | Per-symbol verification status of the community (`Pibbly`) offset dump. |
 | **`RobloxPlayer_RE_Report.md`** | The original broad reverse-engineering report (12 sections). |
@@ -51,12 +51,12 @@ Mach-O entry (0x100041fe2)
 
 Scripts reach the VM through a longer pipeline — asset decode → compilation cache →
 `LuaVMLoad`/`luau_load` → scheduler enqueue → resume. The complete annotated path is in
-`vm-research/00-findings.md`.
+`vm-research/luau-vm.md`.
 
 ## What this build does differently (verified)
 
 Two obfuscations distinguish this Luau from upstream, and both are fully reverse-engineered in
-`vm-research/00-findings.md`:
+`vm-research/luau-vm.md`:
 
 1. **Opcodes are double-scrambled.** Each instruction exists as three different byte values —
    `canonical` (the real ID, `0..92`), `wire` (`= (227 × canonical) & 0xFF`, what ships on

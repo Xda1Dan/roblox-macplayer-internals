@@ -238,6 +238,14 @@ permission -> source / bytecode -> compile / cache -> check / load
 `loadstring` is policy-gated and can be unavailable in RobloxScript
 contexts.
 
+## C++ reproduction (`vm-repro/`)
+
+[`vm-repro/`](vm-repro/) is the working reproduction of the reverse-engineered
+formats and state machines — tested against ground truth (bytes executed from
+the player binary, RFC 8439 cipher vectors, the reference Luau loader), with
+CLI tools to disassemble bytecode and encode/decode script containers.
+See [the tooling page](docs/repro-tooling.md) for details.
+
 ## C++ examples
 
 `include/rbx/` and `src/` are original, simplified illustrations. They are
