@@ -324,6 +324,72 @@ cmp  dword [rcx + rsi + 0x1c], 6   ; node key tag == STRING?
    resolver (`0x1029a8a2e`, hooked through `global+0x398`), which writes the
    found function into the table's node so the *next* execution hits level 1.
 
+## FASTCALL — builtins that skip the call machinery
+
+`FASTCALL A C` (+ `FASTCALL1/2/2K/3` variants) is the fast path for common
+library functions (`math.floor`, `table.insert`, `string.len`, ...). The
+instruction's `A` is a **builtin id**, and `C` is the *distance to the CALL
+that follows* the argument-setup instructions. The handler (`0x1029b4014`)
+reads that future `CALL` word *now*, takes its operands apart, and calls the
+builtin implementation directly — before the interpreter ever reaches it:
+
+```asm
+mov  r14d, [r11 + 3]            ; C — the skip distance
+mov  r15d, [r11 + r14*4 + 4]    ; the CALL word, read ahead!
+mov  ebx, (r15d >> 4) & 0xff0   ; the CALL's A = func/target register
+mov  r9d, (r15d >> 16) & 0xff   ; the CALL's B = argument count + 1
+...
+lea  r10, [0x1072d74e0]         ; the builtin dispatch table
+call qword [r10 + A*8]          ; builtin(L, funcTValue, arg0, arg1)
+```
+
+The builtin returns the number of results, or a negative value to *give up*:
+
+- **Success**: the interpreter skips the argument-setup instructions *and* the
+  `CALL` (`pc += C*4 + 4`) and fixes up `L->top` — the frame top for a fixed
+  result count, or `target + results` when the `CALL` was multret (`C = 0`).
+  The compare that decides this is elegant: the `CALL` word itself exceeds
+  `0xFFFFFF` exactly when its result-count byte is non-zero.
+- **Failure**: execution resumes at the instruction right after `FASTCALL` —
+  the fallback setup (`GETIMPORT`/`MOVE`/`GETUPVAL`) runs, and the real
+  `CALL` performs the call through the generic path. Nothing is lost.
+
+Two gates apply: the current environment must be "safe" (`env->safeenv` —
+fastcalls bypass metamethods, so a tampered environment disables them), and
+the stack base is saved/restored around the builtin because a builtin may
+reallocate the stack.
+
+The builtin table at `0x1072d74e0` is a third dispatch table, indexed by the
+`LuauBuiltinFunction` id baked into the instruction at compile time.
+
+### The builtin id table
+
+The ids match the reference Luau enum exactly (verified by compiling
+one-liners with the reference compiler and reading the emitted `A` field).
+The implementations live contiguously at `0x10298dd90–0x10298f3b3`:
+
+| id | builtin | impl | id | builtin | impl |
+|----|---------|------|----|---------|------|
+| 1 | ASSERT | `0x10298dd90` | 25 | MATH_SQRT | `0x10298e516` |
+| 2 | MATH_ABS | `0x10298ddbd` | 29 | BIT32_BAND | `0x10298e62a` |
+| 9 | MATH_COS | `0x10298df9e` | 30 | BIT32_BNOT | `0x10298e6a6` |
+| 11 | MATH_EXP | `0x10298e023` | 41 | STRING_BYTE | `0x10298eb3b` |
+| 12 | MATH_FLOOR | `0x10298e069` | 43 | STRING_LEN | `0x10298ecba` |
+| 13 | MATH_FMOD | `0x10298e0a2` | 44 | TYPEOF | `0x10298ecf5` |
+| 17 | MATH_LOG | `0x10298e1f3` | 46 | MATH_CLAMP | `0x10298edcb` |
+| 18/19 | MAX/MIN | `0x10298e29c`/`e319` | 49/50 | RAWSET/RAWGET | `0x10298eee7`/`efbd` |
+| 21 | MATH_POW | `0x10298e3f8` | 52 | TABLE_INSERT | `0x10298f042` |
+
+(the remaining ids follow the reference `LuauBuiltinFunction` order:
+3–8 acos/asin/atan2/atan/ceil/cosh, 10 deg, 14 frexp, 16 log10, 20 modf,
+22 rad, 23 sinh, 26 tanh, 27 tan, 28/31–39 the rest of bit32, 40 type,
+42 char, 45 string.sub, 47 sign, 48 round, 51 rawequal, 53 table.unpack)
+
+**Entries 54–59 exist in the binary but are past the reference enum** — they
+are Roblox-added builtins (implementations at `0x10298f1cf`–`0x10298f3b3`).
+Their names are not yet identified; the same compile-and-read method with
+Roblox-only functions (`tick()`, `os.*`, buffer ops) will map them.
+
 ## Loops and the garbage collector
 
 `FORNLOOP A D` (numeric `for`) keeps its three variables in registers
@@ -393,6 +459,7 @@ independent caches — each instruction site learns its own table.
 | `0x1029adfd3` | `luau_execute` — Path A/B dispatcher |
 | `0x1029b359c` | Path B entry: load frame registers, first dispatch |
 | `0x1072d9230` | Path B dispatch table (256 × 8-byte handler pointers, indexed by vmop byte) |
+| `0x1072d74e0` | builtin dispatch table (indexed by `FASTCALL`'s builtin id) |
 | `0x1029b4f33` | `CALL` handler |
 | `0x1029b88f9` | `RETURN` handler |
 | `0x1029b4a5f` | `NAMECALL` handler |

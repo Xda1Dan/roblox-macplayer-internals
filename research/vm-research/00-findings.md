@@ -483,6 +483,14 @@ Dispatch = `jmp [table + opbyte*8]`; handlers tail-jump to the next handler
   (`0x1029add42` rewrites reg[A] and the handler re-executes).
 - **GC at loop backedges**: `FORNLOOP` calls `luaC_step` (`0x102996c06`)
   behind a flag before running the iteration.
+- **FASTCALL / builtins**: a third dispatch table at `0x1072d74e0` maps the
+  instruction's builtin id straight to an implementation
+  (`0x10298dd90–0x10298f3b3`, contiguous). The handler pre-reads the `CALL`
+  instruction that follows (via the `C` skip distance), calls the builtin
+  directly, and on success skips the whole call sequence; on failure the
+  normal fallback + `CALL` path runs. Ids 0–53 match the reference
+  `LuauBuiltinFunction` enum exactly; entries 54–59 are Roblox additions
+  (unidentified).
 
 ---
 
