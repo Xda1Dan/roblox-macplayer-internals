@@ -262,8 +262,8 @@ additions. In order:
 ```c
 // from the decompile; op bytes are vmops at this point
 if (op == 0x78)      newOp = 0x8d;   // GETTABLEKS(120) → GETUDATAKS(141)
-else if (op == 0xec) newOp = 0x7f;   // SETTABLEKS(236) → SETUDATAKS(127)
-else if (op == 0xba) newOp = 0x58;   // NAMECALL(186) → NAMECALLUDATA(88)
+else if (op == 0xec) newOp = 0x58;   // SETTABLEKS(236) → SETUDATAKS(88)
+else if (op == 0xba) newOp = 0x7f;   // NAMECALL(186) → NAMECALLUDATA(127)
 
 if (AUX < 0x10000) {                 // only if the constant fits 16 bits
     k = &constants[AUX];

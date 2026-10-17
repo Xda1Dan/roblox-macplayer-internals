@@ -42,14 +42,82 @@ stepping by `getOpLength(R[vmop])`). After all protos are loaded, a single
 pass walks every proto's instructions and swaps table ops to their userdata
 variants when the referenced string constant has an assigned **atom**:
 `GETTABLEKS→GETUDATAKS`, `SETTABLEKS→SETUDATAKS`, `NAMECALL→NAMECALLUDATA`
-(vmop swaps `0x78→0x8d`, `0xec→0x7f`, `0xba→0x58`). The atom is fetched
+(vmop swaps `0x78→0x8d` (141), `0xec→0x58` (88), `0xba→0x7f` (127)). The atom is fetched
 through a hook at `global+0x658` and cached in the string's `+0x06` field.
 This is what makes userdata field access faster than a generic table lookup.
 
 The full deserialization sequence (string table, proto fields, constants,
 line info, feedback slots) matches the reference `lvmload.cpp` shape; the
 research notes cover the Roblox deviations (integrity gate, wire→vmop
-rewrite, GC suspension).
+rewrite, GC suspension). The authentication internals have their own
+section below.
+
+## Bytecode authentication — SigGuard
+
+The integrity gate (`FUN_1014bb465`, called at `0x1029aa242` before
+deserialization) is not an opaque predicate — it is a signature verifier,
+and its module registers itself at runtime under the literal name
+**SigGuard** (once-init `FUN_105a4ee65` runs
+`FUN_103209804(&DAT_107a70110, "SigGuard")`). On rejection the loader
+pushes `"%s: bytecode corrupted"`; the gate also reports telemetry and
+clears bit 30 of `global+0x630`.
+
+### What a loadable blob looks like
+
+| Requirement | Detail |
+|---|---|
+| Version gate | byte 0 in `3..14` (or `100`); type version `1..3` for v ≥ 4 |
+| Auth trailer | declared version **1**, 24 bytes at end−`0x18`; detected by `trailer[0..4]⊕trailer[20..24] == C4 32 6A <ver>` and `u32[len−0x28]⊕u32[len−0x20] == 0x946AC432` |
+| Checkword | trailer word0⊕word4 must equal `0x74171870` |
+| Signature | the trailer's first 16 bytes, mixed through the table MAC, must equal bytes `[4..16)` of `sha256hex(payload)` |
+
+Unauthenticated and legacy-v0 blobs take the verifier's "simple path" and
+are rejected **by design** (result code 6) — only v1-trailer blobs are ever
+fully verified. Trailer versions ≥ 2 are also rejected (max is the `be38`
+flag), while blobs ≤ `0x117` bytes or with `data[0] == 0` pass through
+untouched (those are the loader's error-message chunks).
+
+### How the signature is checked
+
+1. The payload (blob minus trailer) is digested by a SHA-256-family hash
+   (`FUN_102f486bc`, 32-byte state, algo id `0x20`) and hex-encoded
+   (64 characters).
+2. The trailer's first 16 bytes select rows from a 132 KB table set
+   (8191 × 16-byte rows, packed in the `0x1830c`-byte binary blob at
+   `0x106207760`, expanded lazily on first use). The rows form a
+   **GF(2)-multilinear MAC**: basis rows correspond to single selector
+   bits, `row[n]` is the XOR of the basis rows for each set bit of `n`,
+   and a second table supplies pairwise cross-terms — the check value is
+   a fixed degree-2 boolean function of the selector bytes.
+3. The mixed 12-byte state must equal `sha256hex(payload)[4..16)`.
+
+A failed or weak blob is not silently dropped: the gate fires a telemetry
+event (`placeid`, `version`, `code` ∈ {901 = no trailer, 902 = v0 trailer,
+903 = v1 trailer on a weak path}, `decrcc`, `declocal`), runs an
+anti-tamper fence, and clears bit 30 of `global+0x630` (a 28-bit counter
+plus four flag bits, so the clear is observable by other subsystems).
+
+### Configuration
+
+The policy flags are FFlag-backed descriptors of the form
+`{int value; const char* name}`, initialized by per-global stubs, all
+defaulting to 1:
+
+| Global | Role | Note |
+|---|---|---|
+| `DAT_10752be50` | mode-1 MAC verification enable | named `LsbOptimizationDetail`; **0 auto-passes every signed blob** — the signature kill-switch |
+| `DAT_10752be38` | max supported trailer version | ≥ 2 rejected |
+| `DAT_10752be20` | verification threshold | ≥ 2 also rejects mode 1 (total lockdown) |
+| `DAT_10752be68` | force-signed | rejects v0 blobs outright |
+| `DAT_10752be08` / `DAT_10752bdf0` | payload length gate / compare length | |
+
+!!! note
+    The check binds the trailer to the payload digest with key material
+    baked into the binary, so forging bytecode offline requires the
+    extracted table set. Patching the gate call site (`0x1029aa242`) or
+    flipping `LsbOptimizationDetail` remains the practical bypass.
+
+Full step-by-step notes: `research/vm-research/luau-load.md`.
 
 ## 1. lua_newstate - 0x10299fd5b
 

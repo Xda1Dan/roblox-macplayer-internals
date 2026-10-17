@@ -26,6 +26,7 @@ SHA-256 `ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47`.
 | ScriptContext resume guard, admission chain, `require` state machine | `FUN_101556cb4`, `sub_10159502e`, `FUN_1015c4980`, `FUN_10144ef5e`, `sub_10158dd88` — see `research/vm-research/scriptcontext.md` |
 | RakNet datagram encryption (ChaCha20-Poly1305, custom framing) | `FUN_102d94458` (decrypt), `FUN_102d93dba`/`FUN_10293f84` (encrypt), primitives `FUN_101825740`/`FUN_10182539e` — see `research/vm-research/networking.md` |
 | LBC serialized-chunk format | Parsed and cross-validated against the reference `luau_load` (the reproduction's chunk reader reproduces its output exactly) |
+| Bytecode authentication (SigGuard): v1 auth trailer, SHA-256 payload digest, GF(2)-multilinear table MAC, telemetry, FFlag policy | Gate `FUN_1014bb465` (call site `0x1029aa242`), verifier `FUN_1014bb64e`, mode chain `FUN_1014bc1a8/bc7d4/bc832/bc174`, verdict `FUN_1014bc5c8`, packed tables `0x106207760` (header `47 59 4D 14`) — see [Luau VM lifecycle](luau-vm-lifecycle.md) and `research/vm-research/luau-load.md` |
 | Service membership | Binary names plus public Roblox API docs, labeled where used |
 
 ## Limits
