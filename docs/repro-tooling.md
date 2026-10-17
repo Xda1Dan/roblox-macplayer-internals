@@ -70,12 +70,21 @@ A few highlights of the test discipline in `tests/`:
   committed fixture with a recorded SHA-256; `rbxaudit` re-hashes the
   corresponding binary region. The MAC expansion is cross-checked against
   an independent Python transcription for fixed selectors.
+- **The target certifies the ChaCha20 core.** The binary's ChaCha block
+  function (`FUN_10183c095`) is extracted — machine code, its four
+  rip-relative shuffle constants, and a six-entry rip-relative patch table —
+  into a committed fixture. The test maps it into a scratch arena, patches
+  the displacements, and runs it against the reproduction across a
+  key/nonce/length sweep, counter continuity across calls, and in-place
+  XOR. Pinned contract: `core(state, a, b, len)` writes `b = a ^ ks(state)`
+  and advances the state's 64-bit counter by `ceil(len/64)`. (Same trick as
+  the xxHash32 test.)
 
 ## Building
 
 ```sh
 cd vm-repro
-make test      # builds and runs the six test suites
+make test      # builds and runs the eight test suites
 make demo      # disassemble a wire-encoded sample program
 make audit BINARY=/path/to/RobloxPlayer
 ```
@@ -93,8 +102,8 @@ include/rbxvm/   opcode.hpp, scramble.hpp, insn.hpp, ptrenc.hpp,
 src/             implementations of the above
 tools/           rbxdis (tables/verify/code/chunk), rbxrsb1 (containers),
                  rbxaudit (verify constants against a target binary)
-tests/           six suites + fixtures (compiled Lua, SigGuard tables,
-                 binary machine code)
+tests/           eight suites + fixtures (compiled Lua, SigGuard tables,
+                 extracted machine code)
 ```
 
 Per-area provenance (which binary address every claim came from) lives in

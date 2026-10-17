@@ -309,10 +309,14 @@ C++ reproduction status: the AEAD layer is implemented and tested in
 `../vm-repro/src/aead.cpp` (ChaCha20 + poly1305-donna-32 + the custom
 framing: 8-byte-nonce payload state, counter=1 payload / counter=0 poly key,
 GCM-style length blocks in the MAC, both trailer formats, and the exact
-sequence-window reconstruction). Verified with RFC 8439 primitive vectors and
-a differential test against a spec-faithful bignum reference. The
-machine-code-extraction differential test (as done for xxHash32) remains an
-optional extra hardening step.
+sequence-window reconstruction). Verified with RFC 8439 primitive vectors, an
+independent KAT, and — like the xxHash32 checksum — by **executing the
+binary's own machine code**: the ChaCha20 block core (`FUN_10183c095`,
+extracted with a rip-relative patch table into
+`vm-repro/tests/fixtures/chacha_core.bin`) runs in the test and agrees with
+the reproduction over a key/nonce/length sweep. The execution pins the core's
+contract: `core(state, bufA, bufB, len)` writes `bufB = bufA ^ keystream`,
+and advances the 64-bit counter inside `state` by `ceil(len/64)`.
 
 ## Addresses
 

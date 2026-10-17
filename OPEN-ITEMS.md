@@ -97,9 +97,16 @@ this repository; unchecked boxes are genuinely open.
   feedback fields, main-proto closure; round-trips canonical and wire
   inputs to identical VMOP code + disassembly.
 - [ ] Interpreter core (Path B first).
-- [ ] Machine-code differential test for the AEAD primitives (the xxHash32
-  test already executes the binary's own code; AEAD currently uses an
-  independent model + RFC vectors).
+- [x] **Machine-code differential test for the AEAD's ChaCha core** — the
+  binary's own `FUN_10183c095` is extracted (code + 4 rip-relative shuffle
+  constants + a 6-entry rip-relative patch table) into
+  `tests/fixtures/chacha_core.bin` and executed in
+  `tests/test_chacha_binary.cpp`; it matches the reproduction across a
+  key/nonce/length sweep, across calls (counter continuity), and in-place.
+  Pinned contract: `core(state, a, b, len)` writes `b = a ^ ks(state)` and
+  advances the state's 64-bit counter by `ceil(len/64)`.
+- [ ] Poly1305 machine-code differential test (same trick; primitives are
+  `FUN_101835319/39d/46a/607` — more pieces, same pattern).
 - [ ] IMPORT constant evaluation against a synthetic environment (the
   loader keeps import ids; resolution needs the embedder's `_G`).
 

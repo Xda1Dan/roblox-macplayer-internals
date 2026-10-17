@@ -19,8 +19,9 @@ source is reproduced.
 | Verified struct offsets (`lua_State`, `CallInfo`, `Proto`, `Closure`, `TString`, `LuaTable`) | **done** | constants + static asserts |
 | RSB1 container: scramble, key recovery, xxHash32, zstd | **done, tested** | checksum executed from the binary's own machine code |
 | ScriptContext guard/admission/require models | **done, tested** | guard is exact; admission polarity corrected; `require` is a behavioral model |
-| RakNet AEAD (ChaCha20-Poly1305, custom framing) | **done, tested** | RFC 8439 primitive vectors + independent KAT; suffix is not consumed |
+| RakNet AEAD (ChaCha20-Poly1305, custom framing) | **done, tested** | RFC 8439 primitive vectors + independent KAT + **binary's own ChaCha core executed in the test** (sweep, counter continuity, in-place) |
 | LBC reader + constant-aware disassembly | **done, tested** | full compile→wire→container→decode→disassemble pipeline |
+| `rbxcha-bin` machine-code test | **done** | executes the extracted ChaCha core against the reproduction |
 | **SigGuard** bytecode auth (mode chain, SHA-256, table MAC) | **done, tested** | packed tables extracted from the binary; MAC cross-checked against an independent Python model |
 | Binary audit tool | **done** | re-checks tables/handlers/blob/checksum/gate call site against a real Mach-O |
 | `luau_load`-equivalent loader (Proto/Closure build) | **done, tested** (`src/loader.cpp` + `tests/test_loader.cpp`) — version gates, per-proto wire→vmop rewrite, injectable atom pass |
@@ -86,6 +87,10 @@ SigGuard blob hash/header, the checksum machine-code hash, and the
 - `tests/fixtures/sigguard_tables.bin` — the binary's `0x1830C` packed
   table blob at VA `0x106207760` (8257 × 12-byte records, header
   `GYM\x14`). SHA-256 `0b6cdf37…f42c3c`.
+- `tests/fixtures/chacha_core.bin` — the binary's ChaCha20 block core
+  (`FUN_10183c095`, 875 bytes) plus its four rip-relative shuffle constants
+  and a six-entry rip-relative patch table, so `test_chacha_binary` can run
+  the extracted code from a scratch arena.
 - `tests/ground_truth.inc` — the actual 318-byte machine code of the
   container checksum (`FUN_103222533`), executed by the RSB1 test.
 - `tests/handler_addresses.inc` — Path A/B handler addresses generated

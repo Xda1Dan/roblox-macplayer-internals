@@ -12,7 +12,8 @@ The project is deliberately split into two layers:
 - **[`vm-repro/`](vm-repro/README.md)** — the reproduction: opcode tables,
   disassembler, RSB1 containers, LBC reader, ScriptContext models, RakNet
   AEAD, SigGuard bytecode auth, plus a binary audit tool. `make test` runs
-  six suites.
+  eight suites (including a test that executes the binary's
+  own ChaCha20 core).
 
 The site pages in [`docs/`](docs/index.md) are narrative write-ups. Where
 they disagree with `research/`, the research notes win.
