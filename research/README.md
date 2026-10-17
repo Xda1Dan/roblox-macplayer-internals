@@ -1,102 +1,92 @@
-# RobloxPlayer (macOS) — Reverse Engineering Project
+# Research notes — RobloxPlayer (macOS) build f9247f9560044102
 
-> Working notes for this reverse-engineering effort. They live in this repository but are kept
-> out of the published site build; the curated write-ups are in [`docs/`](../docs/index.md).
+These are the **evidence-first** notes. Every load-bearing claim cites a
+function address in the target binary; the reproduction in
+[`../vm-repro/`](../vm-repro/) turns the formats and state machines into
+tested code, and `rbxaudit` re-checks the constants against the actual
+Mach-O.
 
-Reverse engineering of the macOS Roblox player binary, focused on how the engine executes
-scripts and manages its internals: the Luau VM, ScriptContext, TaskScheduler, DataModel,
-RunService, and the RbxTransport networking layer.
+The curated site pages in [`../docs/`](../docs/index.md) are narrative
+write-ups. Where they disagree with `research/vm-research/`, the research
+notes win.
 
 ## Target
 
 | | |
 |---|---|
-| **Binary** | `MacPlayer-version-f9247f9560044102/RobloxPlayer.app/Contents/MacOS/RobloxPlayer` |
-| **Format** | Mach-O (x86-64), Objective-C++ / C++ (libc++), stripped |
-| **Image base** | `0x100000000` (all VAs in these docs are absolute; subtract the base for a file offset) |
-| **Size** | ~127 MB mapped (`133,177,600` bytes across 43 memory blocks) |
-| **Luau** | `0.742.0.7421053` |
-| **Analysis tool** | Ghidra (headless MCP), project `tmp-rea-ghidra/ghidra-proj`, program `RobloxPlayer` |
-| **Functions identified** | ~549,782 (auto-analysis; the deep dives below cover a targeted subset) |
+| Binary | `MacPlayer-version-f9247f9560044102/RobloxPlayer.app/Contents/MacOS/RobloxPlayer` |
+| Format | Mach-O x86-64, stripped |
+| Size | `125,285,200` bytes |
+| SHA-256 | `ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47` |
+| Image base | `0x100000000` |
+| Luau | `0.742.0.7421053` |
+| Reference tree | `luau-oss/` at tag `0.742` |
+
+VAs are absolute (`0x100000000 + RVA`). For the `__TEXT` and `__DATA`
+segments, `VA = file offset + 0x100000000`; `__LINKEDIT` does not follow that
+rule.
 
 ## Documents
 
-| File | Contents |
-|------|----------|
-| **`vm-research/luau-vm.md`** | **The Luau VM deep dive** — opcode encoding, pointer-encoding scheme, interpreter internals, verified object layouts, and the full script-execution address map. Start here for anything VM-related. |
-| **`vm-research/scriptcontext.md`** | **The ScriptContext layer** — resume pipeline and guard (200-limit, shutdown deadline, time accounting), result-code mapping, facet gates, `startScript` admission chain, the compilation-cache load step, and the `require` module state machine. |
-| **`vm-research/networking.md`** | **RakNet datagram crypto & framing** — ChaCha20-Poly1305 (custom framing: 8-byte-nonce payload state, GCM-style length blocks in the MAC), the "UniqueNumber" nonce, asymmetric trailer formats per direction, directional keys, the Rupp handshake (RbxOpenRequest2/Reply2), DHF partial layout, and the open wire-format targets. |
-| **[`vm-repro/`](../vm-repro/)** | **C++ reproduction** of the verified internals — opcode tables, disassembler, RSB1 container pipeline, ScriptContext state machines, RakNet AEAD, LBC chunk reader, each with tests. See the [tooling page](../docs/repro-tooling.md). |
-| **`vm-research/opcode-map.csv`** | All 93 opcodes, verified: canonical / wire / vmop numbers, aux flag, and both interpreter handler addresses. |
-| **`vm-research/dump-crosscheck.txt`** | Per-symbol verification status of the community (`Pibbly`) offset dump. |
-| **`RobloxPlayer_RE_Report.md`** | The original broad reverse-engineering report (12 sections). |
-| **`offsets.md`** | Memory-offset reference (RVA + VA), with community-dump corrections. |
-| **`structures.md`** | ScriptContext / TaskScheduler / DataModel structure layouts. |
-| **[`docs/`](../docs/index.md)** | Curated subsystem write-ups (script execution, scheduler, networking, …). |
+| File | Contents | Evidence |
+|------|----------|----------|
+| **`vm-research/luau-vm.md`** | Opcode triple-numbering, pointer encodings, interpreter paths, verified object layouts, address map | First-hand (Ghidra + binary bytes) |
+| **`vm-research/luau-load.md`** | `LuaVMLoad` / `luau_load` end to end, version gates, wire→vmop rewrite, atom pass, **SigGuard** auth gate | First-hand |
+| **`vm-research/scriptcontext.md`** | Resume guard, deadline/facet gates, `startScript` admission (polarity-corrected), `require` state machine | First-hand; some admission fields modeled |
+| **`vm-research/networking.md`** | RakNet ChaCha20-Poly1305 framing, nonces, sequence window, Rupp handshake, DHF | First-hand; KDF open |
+| **`vm-research/opcode-map.csv`** | 93 opcodes: canonical/wire/vmop, AUX flag, Path A/B handler addresses | Verified against both dispatch tables |
+| **`vm-research/dump-crosscheck.txt`** | Per-symbol status of the community offset dump | First-hand |
+| `offsets.md` | RVA/VA reference and dump corrections | First-hand, targeted |
+| `structures.md` | ScriptContext/scheduler fields actually used by the reproduction | First-hand + marked narrative |
+| [`../vm-repro/`](../vm-repro/) | C++ reproduction + tests + `rbxaudit` | Tests pass; audit checks the binary |
+| [`archive/RobloxPlayer_RE_Report.md`](archive/RobloxPlayer_RE_Report.md) | Early broad report, kept for history | **Superseded — do not cite** |
 
-## TL;DR — execution architecture
+## What is actually verified
 
-```
-Mach-O entry (0x100041fe2)
-  └─ NSApplicationMain
-      └─ RobloxPlayerAppDelegate.applicationDidFinishLaunching
-          └─ "Initializing lua app" → "Bind to services" → game launch
-              └─ DataModel created (services bound)
-                  └─ RunService frame loop
-                      └─ ScriptContextResume          0x1015566d6
-                          └─ C-stack / deadline guard 0x101556cb4   (limit 200)
-                              └─ lua_resume           0x102995af5
-                                  └─ luaD_rawrunprotected 0x102995084
-                                      └─ luau_execute 0x1029adfd3   ← bytecode interpreter
-                                          └─ Path B (normal)  0x1029b359c  — table 0x1072d9230
-                                          └─ Path A (debug)   0x1029adfe9  — table 0x1072d8a30
-```
+- **Opcode numbering:** `wire = 227*canonical mod 256`, `vmop = T[wire]`,
+  `canonical = R[vmop]`; `T` at `0x1063bb686`, `R` at `0x10648bb74`. Both
+  tables are permutations; all 93 opcodes round-trip. `getOpLength`
+  (`0x1029abbe3`) agrees with the 31 AUX opcodes.
+- **Dispatch:** both 256-entry tables (`0x1072d8a30` Path A,
+  `0x1072d9230` Path B) have exactly 93 non-null entries; every entry
+  matches `opcode-map.csv`.
+- **Layouts:** `lua_State`, `CallInfo`, `Proto`, `Closure`, `TString`,
+  `LuaTable` offsets in `vm-repro/include/rbxvm/layouts.hpp`, recovered from
+  `luaF_newproto`/`luaF_freeproto`, `lua_resetthread`, `luaS_newlstr`, and
+  the interpreter entry.
+- **Pointer encodings:** four self-address-relative schemes; hot-path
+  pointers (`Proto.k/.code/.p`, `Closure.p/f`) are plain.
+- **RSB1 containers:** scramble key derivation, xxHash32 checksum (executed
+  from the binary's own machine code in tests), zstd payload, magic paths.
+- **AEAD:** ChaCha20 + poly1305-donna-32 with the custom framing. The
+  counter-0 poly key and payload keystream both read only nonce bytes 0..8;
+  the 4-byte suffix is carried but not consumed.
+- **SigGuard:** mode chain, SHA-256 payload digest, 8257-record packed
+  table set, A/B/C expansion, 12-byte table MAC, verdict mapping. The
+  reproduction includes the table blob as a fixture and cross-checks the MAC
+  against an independent Python transcription.
+- **ScriptContext guard:** 200-deep limit, shutdown deadline
+  (`ctx+0x4b8`), facet phase (`<3` valid), time accounting, result mapping.
+- **LBC:** strings/constants/protos/line/debug/feedback parsing, header-only
+  opcode conversion (AUX words untouched), full compile→wire→container→
+  decode→disassemble pipeline.
 
-Scripts reach the VM through a longer pipeline — asset decode → compilation cache →
-`LuaVMLoad`/`luau_load` → scheduler enqueue → resume. The complete annotated path is in
-`vm-research/luau-vm.md`.
+## What is not claimed
 
-## What this build does differently (verified)
+- The X25519 → session-key KDF (EVP dispatch; dynamic analysis needed).
+- Reliable-frame/ACK/NAK wire formats and the full DHF field semantics.
+- The `+0xa18` phase-counter writer and the identity getter classes.
+- `require`'s state *writes* during a run (state reads are verified).
+- The broad site pages' scheduler/DataModel/ObjC details are narrative;
+  they were not re-verified in this pass.
+- Anything about other builds. Offsets and addresses move.
 
-Two obfuscations distinguish this Luau from upstream, and both are fully reverse-engineered in
-`vm-research/luau-vm.md`:
+## Method
 
-1. **Opcodes are double-scrambled.** Each instruction exists as three different byte values —
-   `canonical` (the real ID, `0..92`), `wire` (`= (227 × canonical) & 0xFF`, what ships on
-   disk), and `vmop` (`= T[wire]`, what the interpreter dispatches on, `T` at `0x1063bb686`).
-   A reverse map back to canonical lives at `0x10648bb74`.
-
-2. **Some object fields are pointer-encoded.** Debug/source metadata in `Proto`, plus
-   `TString.hash`, userdata metatables and `lua_State.stacksize`, are stored scrambled relative
-   to **their own field address** (four variants: add / subtract / reverse-subtract / XOR).
-   There is no secret key — but reading these fields without decoding returns garbage. The
-   hot-path pointers (`Proto.code`, `Proto.k`, `Proto.p`, `Closure.p`) are **not** encoded.
-
-## Corrections to the community offset dump
-
-The community (`Pibbly`) offsets header is a **merge from multiple builds**, so most entries
-resolve but a few point at the wrong thing. Confirmed errors for *this* binary:
-
-| Symbol | Dump value | Correct |
-|--------|-----------|---------|
-| `OpcodeLookupTable` | `0x63bb680` | `0x63bb686` (off by 6 — it's the wire→vmop scramble table `T`) |
-| `task.spawn` | `0x14cff67` | `0x14cf416` |
-| `task.delay` | `0x14cf880` | `0x14cf56a` (dump reused the `task.cancel` address) |
-| `lua_rawcheckstack` | `0x2995b7f` | mislabeled — that address is the resume / nCcalls guard |
-
-Note the dump's `OpcodeLookupTable` and the interpreter **dispatch** jump table are two
-different tables. The scramble table `T` is `0x1063bb686`; the Path A/B dispatch tables are
-`0x1072d8a30` / `0x1072d9230`. Earlier notes conflated these.
-
-The `Input.Fire*`, `RakNet.*`, `GetGlobalState` and `PushInstance` entries previously marked
-"out of range" **do** resolve to valid functions in this build; the real issue with the dump is
-the mislabels above, not out-of-range addresses.
-
-## Methodology
-
-1. String cross-references (`[FLog::*]` channels) to locate subsystems.
-2. Byte-pattern scans for name and dispatch tables.
-3. On-demand decompilation of the functions Ghidra identified.
-4. Cross-validation against the open-source Luau tree this build derives from, plus the
-   community offset dump — every structural claim in `vm-research/` was confirmed first-hand in
-   the disassembler rather than taken from the dump.
+1. String/xref anchors (`[FLog::*]`, registry keys) to find subsystems.
+2. Byte-pattern scans for tables and constants.
+3. On-demand Ghidra decompilation/disassembly of the named functions.
+4. Cross-check against `luau-oss` 0.742 for semantics, and against the
+   actual Mach-O bytes for every table/constant via `rbxaudit`.
+5. Anything that could not be pinned down is listed as an open item, not
+   presented as fact.

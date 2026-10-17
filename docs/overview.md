@@ -19,14 +19,16 @@ and address convention used everywhere else in this repository.
 | Symbols | 2275 symtab entries: 668 defined, 1606 undefined imports |
 | SHA-256 | `ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47` |
 
-Addresses in this repository are virtual addresses. For this build:
+Addresses in this repository are virtual addresses. For this build, the
+`__TEXT` and `__DATA` segments satisfy:
 
 ```text
 virtual address = file offset + 0x100000000
 ```
 
 Example: the string reference at file offset `0x68d7655` is address
-`0x1068d7655`.
+`0x1068d7655`. `__LINKEDIT` does **not** follow this rule; use its segment
+mapping if you need to convert there.
 
 ## Frameworks
 

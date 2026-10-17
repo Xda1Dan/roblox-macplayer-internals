@@ -217,31 +217,51 @@ static void testAdmission() {
     AdmissionConfig cfg;
     cfg.cfgA = {100, 50};
     cfg.cfgB = {100, 50};
+    cfg.enforce_core_script_window = false; // isolate the predicate logic
 
-    // unrestricted container: no predicate → allow even RobloxScript class
+    // No predicate is fail-closed (FUN_1015c4980 returns 1 = blocked).
     cfg.has_predicate = false;
     AdmissionRequest req;
-    req.is_roblox_script_class = true;
-    req.in_allowlist = false;
     req.schema_version = 100;
-    CHECK(sctx::admissionAllowed(req, cfg), "no predicate allow-all");
+    CHECK(!sctx::admissionAllowed(req, cfg), "no predicate is fail-closed");
 
-    // restricted container: predicate present
+    // Predicate present: diffA <= cfgA.limit is an early ALLOW.
     cfg.has_predicate = true;
-    CHECK(!sctx::admissionAllowed(req, cfg), "RobloxScript class denied");
-    req.is_roblox_script_class = false;
-    CHECK(!sctx::admissionAllowed(req, cfg), "not in allowlist denied");
-    req.in_allowlist = true;
-    CHECK(sctx::admissionAllowed(req, cfg), "allowlisted allowed");
+    req.schema_version = 120; // diffA = 20 <= 50
+    req.in_blocklist = true;
+    CHECK(sctx::admissionAllowed(req, cfg), "diffA within window early-allows");
 
-    // container mismatch denies before anything else
+    // diffA > cfgA.limit: the blocklist decides for normal scripts.
+    req.schema_version = 200; // diffA = 100 > 50
+    req.in_blocklist = false;
+    CHECK(sctx::admissionAllowed(req, cfg), "not in blocklist allowed");
+    req.in_blocklist = true;
+    CHECK(!sctx::admissionAllowed(req, cfg), "blocklist hit denied");
+
+    // RobloxScript class with diffB within its window early-allows even if
+    // the blocklist contains it; outside the window the blocklist decides.
+    req.is_roblox_script_class = true;
+    req.schema_version = 120; // diffB = 20 <= 50
+    req.in_blocklist = true;
+    CHECK(sctx::admissionAllowed(req, cfg), "RobloxScript early allow");
+    req.schema_version = 200; // diffB = 100 > 50
+    req.in_blocklist = true;
+    CHECK(!sctx::admissionAllowed(req, cfg), "RobloxScript blocklist hit");
+
+    // Container mismatch denies before anything else.
+    req.in_blocklist = false;
     req.owner_matches_context = false;
     CHECK(!sctx::admissionAllowed(req, cfg), "container mismatch denies");
     req.owner_matches_context = true;
 
-    // version gates deny
-    req.schema_version = 200; // (200-100)=100 > 50
-    CHECK(!sctx::admissionAllowed(req, cfg), "version beyond limit denies");
+    // The flag-gated second window (DAT_10752c840) allows only
+    // diffA <= cfgA.limit; it can block an otherwise allowed script.
+    cfg.enforce_core_script_window = true;
+    req.is_roblox_script_class = false;
+    req.schema_version = 120;
+    CHECK(sctx::admissionAllowed(req, cfg), "second window within limit allows");
+    req.schema_version = 200;
+    CHECK(!sctx::admissionAllowed(req, cfg), "second window beyond limit blocks");
 }
 
 static void testStartScriptFlow() {
@@ -249,7 +269,11 @@ static void testStartScriptFlow() {
     sctx::StartScript ss(ctx);
     sctx::AdmissionRequest req;
     sctx::AdmissionConfig cfg;
-    cfg.has_predicate = false;
+    cfg.has_predicate = true;
+    cfg.enforce_core_script_window = false;
+    req.schema_version = 0;
+    cfg.cfgA = {0, 0};
+    cfg.cfgB = {0, 0};
 
     int load_calls = 0;
     auto load_ok = [&] { ++load_calls; return 0; };
@@ -284,7 +308,10 @@ static void testStartReentrancyFatal() {
     sctx::StartScript ss(ctx);
     sctx::AdmissionRequest req;
     sctx::AdmissionConfig cfg;
-    cfg.has_predicate = false;
+    cfg.has_predicate = true;
+    cfg.enforce_core_script_window = false;
+    cfg.cfgA = {0, 0};
+    cfg.cfgB = {0, 0};
     CHECK_THROWS_MSG(ss.run(req, cfg, [] { return 0; }),
                      "startScript re-entrancy has exceeded 3", "re-entrancy fatal");
 
@@ -327,13 +354,22 @@ static void testModuleStateMachine() {
 
     sctx::ModuleRecord m4;
     m4.state = ModuleState::Pending;
-    m4.weak_ref_resolves = false;
+    m4.weak_ref_pending = true;
+    m4.weak_ref_is_function = false;
+    CHECK_THROWS_MSG(sctx::requireModule(m4, false, RequireContextClass::Normal,
+                                         RequireContextClass::Normal, "mod"),
+                     "expected to resolve to a table", "non-function weak ref");
+    m4.weak_ref_is_function = true;
+    m4.weak_ref_returns_nil = true;
     CHECK_THROWS_MSG(sctx::requireModule(m4, false, RequireContextClass::Normal,
                                          RequireContextClass::Normal, "mod"),
                      "destroyed and can no longer be required", "destroyed module");
-    m4.weak_ref_resolves = true;
+    m4.weak_ref_returns_nil = false;
     sctx::requireModule(m4, false, RequireContextClass::Normal,
                         RequireContextClass::Normal, "mod"); // resolves ok
+    m4.weak_ref_pending = false; // already materialized
+    sctx::requireModule(m4, false, RequireContextClass::Normal,
+                        RequireContextClass::Normal, "mod");
 
     sctx::ModuleRecord m5;
     m5.state = static_cast<ModuleState>(9);
@@ -344,22 +380,29 @@ static void testModuleStateMachine() {
 
 static void testRequireContextRules() {
     using sctx::RequireContextClass;
-    // .config cannot be required
+    // .config cannot be required when the flag is on; the flag can disable it.
     CHECK_THROWS_MSG(sctx::checkConfigModuleName(".config"),
                      ".config modules are configuration scripts", ".config rule");
+    sctx::checkConfigModuleName(".config", /*enforce=*/false);
     sctx::checkConfigModuleName("regular_module"); // ok
 
     // RobloxScript module required from normal context → fatal
-    CHECK_THROWS_MSG(sctx::checkCrossContext(RequireContextClass::Normal,
+    CHECK_THROWS_MSG(sctx::checkCrossContext(false, RequireContextClass::Normal,
                                              RequireContextClass::RobloxScript, "m"),
                      "RobloxScript module from a non RobloxScript context",
                      "cross-context normal->roblox");
-    // normal module required from normal context → fine
-    sctx::checkCrossContext(RequireContextClass::Normal,
+    // normal module required from RobloxScript context → the other fatal
+    CHECK_THROWS_MSG(sctx::checkCrossContext(false, RequireContextClass::RobloxScript,
+                                             RequireContextClass::Normal, "m"),
+                     "Cannot require a non-RobloxScript module from a RobloxScript",
+                     "cross-context roblox->normal");
+    // same class → fine
+    sctx::checkCrossContext(false, RequireContextClass::Normal,
                             RequireContextClass::Normal, "m");
-    // a RobloxScript requirer skips both checks (the binary only gates
-    // non-RobloxScript requirers)
-    sctx::checkCrossContext(RequireContextClass::RobloxScript,
+    sctx::checkCrossContext(false, RequireContextClass::RobloxScript,
+                            RequireContextClass::RobloxScript, "m");
+    // FUN_101543e94()!=0 skips both checks
+    sctx::checkCrossContext(true, RequireContextClass::RobloxScript,
                             RequireContextClass::Normal, "m");
 }
 

@@ -52,6 +52,10 @@ notes conflated them.
 | Symbol | RVA | VA | Notes |
 |--------|-----|----|-------|
 | `ScriptContextResume` | `0x15566d6` | `0x1015566d6` | resume trampoline — exact match with the dump |
+| `startScript` wrapper | `0x158ac46` | `0x10158ac46` | builds the request struct and calls `startScript` |
+| `startScript` | `0x158afe8` | `0x10158afe8` | re-entrancy/scope gate, admission, load, enqueue |
+| SigGuard gate | `0x14bb465` | `0x1014bb465` | bytecode-auth verifier (SHA-256 + table MAC) |
+| SigGuard tables | `0x6207760` | `0x106207760` | 8257 packed 12-byte records (`0x1830C`, header `GYM\x14`) |
 | `task_lib_init` | `0x14cebe0` | `0x1014cebe0` | registers the `task.*` luaL_Reg table |
 | `task.defer` | `0x14cef92` | `0x1014cef92` | |
 | `task.wait` | `0x14cf74a` | `0x1014cf74a` | |

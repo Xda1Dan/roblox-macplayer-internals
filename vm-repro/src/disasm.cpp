@@ -96,9 +96,12 @@ unsigned disassembleOne(const uint32_t* code, size_t count, size_t index,
     case LOP_BREAK: std::snprintf(buf, sizeof buf, "BREAK"); out += buf; break;
     case LOP_LOADNIL: std::snprintf(buf, sizeof buf, "LOADNIL R%u", a); out += buf; break;
     case LOP_LOADB:
-        std::snprintf(buf, sizeof buf, "LOADB R%u %u", a, b);
+        // C is a relative skip count, not a resolved label (upstream prints +C).
+        if (c)
+            std::snprintf(buf, sizeof buf, "LOADB R%u %u +%u", a, b, c);
+        else
+            std::snprintf(buf, sizeof buf, "LOADB R%u %u", a, b);
         out += buf;
-        appendTarget(out, i, c); // C is the jump offset
         break;
     case LOP_LOADN: std::snprintf(buf, sizeof buf, "LOADN R%u %d", a, d); out += buf; break;
     case LOP_LOADK:
@@ -107,11 +110,11 @@ unsigned disassembleOne(const uint32_t* code, size_t count, size_t index,
         break;
     case LOP_MOVE: std::snprintf(buf, sizeof buf, "MOVE R%u R%u", a, b); out += buf; break;
     case LOP_GETGLOBAL:
-        std::snprintf(buf, sizeof buf, "GETGLOBAL R%u slot=%u", a, c);
+        std::snprintf(buf, sizeof buf, "GETGLOBAL R%u", a);
         out += buf; appendK(out, aux, ctx);
         break;
     case LOP_SETGLOBAL:
-        std::snprintf(buf, sizeof buf, "SETGLOBAL R%u slot=%u", a, c);
+        std::snprintf(buf, sizeof buf, "SETGLOBAL R%u", a);
         out += buf; appendK(out, aux, ctx);
         break;
     case LOP_GETUPVAL: std::snprintf(buf, sizeof buf, "GETUPVAL R%u %u", a, b); out += buf; break;
@@ -133,12 +136,12 @@ unsigned disassembleOne(const uint32_t* code, size_t count, size_t index,
     case LOP_GETTABLE: std::snprintf(buf, sizeof buf, "GETTABLE R%u R%u R%u", a, b, c); out += buf; break;
     case LOP_SETTABLE: std::snprintf(buf, sizeof buf, "SETTABLE R%u R%u R%u", a, b, c); out += buf; break;
     case LOP_GETTABLEKS:
-        std::snprintf(buf, sizeof buf, "GETTABLEKS R%u R%u slot=%u", a, b, c);
-        out += buf; appendK(out, aux, ctx);
+        std::snprintf(buf, sizeof buf, "GETTABLEKS R%u R%u", a, b);
+        out += buf; appendK(out, aux & 0xffff, ctx);
         break;
     case LOP_SETTABLEKS:
-        std::snprintf(buf, sizeof buf, "SETTABLEKS R%u R%u slot=%u", a, b, c);
-        out += buf; appendK(out, aux, ctx);
+        std::snprintf(buf, sizeof buf, "SETTABLEKS R%u R%u", a, b);
+        out += buf; appendK(out, aux & 0xffff, ctx);
         break;
     case LOP_GETTABLEN: std::snprintf(buf, sizeof buf, "GETTABLEN R%u R%u %u", a, b, unsigned(c) + 1); out += buf; break;
     case LOP_SETTABLEN: std::snprintf(buf, sizeof buf, "SETTABLEN R%u R%u %u", a, b, unsigned(c) + 1); out += buf; break;
@@ -151,8 +154,8 @@ unsigned disassembleOne(const uint32_t* code, size_t count, size_t index,
         }
         break;
     case LOP_NAMECALL:
-        std::snprintf(buf, sizeof buf, "NAMECALL R%u R%u slot=%u", a, b, c);
-        out += buf; appendK(out, aux, ctx);
+        std::snprintf(buf, sizeof buf, "NAMECALL R%u R%u", a, b);
+        out += buf; appendK(out, aux & 0xffff, ctx);
         break;
     case LOP_CALL:
         std::snprintf(buf, sizeof buf, "CALL R%u %d %d", a, b - 1, c - 1);
@@ -208,16 +211,20 @@ unsigned disassembleOne(const uint32_t* code, size_t count, size_t index,
         std::snprintf(buf, sizeof buf, "%s R%u R%u", kOpInfos[canon].name, a, b);
         out += buf;
         break;
-    case LOP_NEWTABLE:
-        std::snprintf(buf, sizeof buf, "NEWTABLE R%u bsize=%u asize=%u", a, b, aux);
+    case LOP_NEWTABLE: {
+        // B encodes the array size as 0 or 1<<(B-1); AUX is the hash size.
+        unsigned asize = b == 0 ? 0u : (1u << (b - 1));
+        std::snprintf(buf, sizeof buf, "NEWTABLE R%u array=%u hash=%u", a, asize, aux);
         out += buf;
         break;
+    }
     case LOP_DUPTABLE:
         std::snprintf(buf, sizeof buf, "DUPTABLE R%u", a);
         out += buf; appendK(out, d, ctx);
         break;
     case LOP_SETLIST:
-        std::snprintf(buf, sizeof buf, "SETLIST R%u %d %d start=%u", a, b - 1, c - 1, aux);
+        // SETLIST A B C AUX: B = table register, C-1 = value count, AUX = start index.
+        std::snprintf(buf, sizeof buf, "SETLIST R%u R%u count=%d start=%u", a, b, c - 1, aux);
         out += buf;
         break;
     case LOP_FORNPREP: case LOP_FORNLOOP: case LOP_FORGPREP:
@@ -226,8 +233,9 @@ unsigned disassembleOne(const uint32_t* code, size_t count, size_t index,
         out += buf; appendTarget(out, i, d);
         break;
     case LOP_FORGLOOP: {
+        // Upstream: low byte = variable count; signed AUX < 0 marks inext.
         std::snprintf(buf, sizeof buf, "FORGLOOP R%u vars=%u%s", a, aux & 0xff,
-                      (aux & 0x100) ? " ipairs" : "");
+                      int32_t(aux) < 0 ? " [inext]" : "");
         out += buf; appendTarget(out, i, d);
         break;
     }
@@ -261,11 +269,13 @@ unsigned disassembleOne(const uint32_t* code, size_t count, size_t index,
         out += buf; appendTarget(out, i, c);
         break;
     case LOP_COVERAGE:
-        std::snprintf(buf, sizeof buf, "COVERAGE hits=%d", e);
-        out += buf;
+        out += "COVERAGE";
         break;
     case LOP_CAPTURE:
-        std::snprintf(buf, sizeof buf, "CAPTURE %s %u", captureTypeName(a), b);
+        // VAL captures a register, REF captures a register by reference,
+        // UPVAL captures an upvalue (B indexes U for UPVAL).
+        std::snprintf(buf, sizeof buf, "CAPTURE %s %c%u", captureTypeName(a),
+                      a == 2 ? 'U' : 'R', b);
         out += buf;
         break;
     case LOP_FASTCALL1:
@@ -281,9 +291,15 @@ unsigned disassembleOne(const uint32_t* code, size_t count, size_t index,
         out += buf; appendK(out, aux, ctx);
         appendTarget(out, i, c);
         break;
-    case LOP_JUMPXEQKNIL: case LOP_JUMPXEQKB: {
-        std::snprintf(buf, sizeof buf, "%s R%u val=%u%s", kOpInfos[canon].name,
-                      a, aux & 1, (aux >> 31) ? " NOT" : "");
+    case LOP_JUMPXEQKNIL: {
+        std::snprintf(buf, sizeof buf, "%s R%u%s", kOpInfos[canon].name, a,
+                      (aux >> 31) ? " NOT" : "");
+        out += buf; appendTarget(out, i, d);
+        break;
+    }
+    case LOP_JUMPXEQKB: {
+        std::snprintf(buf, sizeof buf, "%s R%u %u%s", kOpInfos[canon].name, a, aux & 1,
+                      (aux >> 31) ? " NOT" : "");
         out += buf; appendTarget(out, i, d);
         break;
     }
@@ -319,15 +335,21 @@ unsigned disassembleOne(const uint32_t* code, size_t count, size_t index,
         out += buf; appendTarget(out, i, d);
         break;
     case LOP_FASTPCALL:
-        std::snprintf(buf, sizeof buf, "FASTPCALL id=%u %u", a, b);
+        // A selects the builtin: 0 = pcall, nonzero = xpcall.
+        std::snprintf(buf, sizeof buf, "FASTPCALL %s", a == 0 ? "pcall" : "xpcall");
         out += buf; appendTarget(out, i, c);
         break;
     case LOP_NEWCLASS:
-        std::snprintf(buf, sizeof buf, "NEWCLASS R%u super=%u open=%u", a, b, c & 1);
+        if (b == 0xff)
+            std::snprintf(buf, sizeof buf, "NEWCLASS R%u no_base", a);
+        else
+            std::snprintf(buf, sizeof buf, "NEWCLASS R%u R%u", a, b);
         out += buf; appendK(out, aux, ctx);
+        std::snprintf(buf, sizeof buf, " flags=%u", c);
+        out += buf;
         break;
     case LOP_CONSTRUCT:
-        std::snprintf(buf, sizeof buf, "CONSTRUCT R%u R%u fb=%u", a, b, aux);
+        std::snprintf(buf, sizeof buf, "CONSTRUCT R%u R%u slot=%u", a, b, aux);
         out += buf;
         break;
     case LOP_FINCONSTRUCT:

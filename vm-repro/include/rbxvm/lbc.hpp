@@ -57,9 +57,9 @@ struct Constant {
     };
     Kind kind = Kind::Nil;
     bool b = false;               // Boolean
-    double num = 0.0;             // Number / VectorD components in numvec
-    float vec[4] = {0, 0, 0, 0};  // Vector
-    bool vecd = false;            // true when the vector came as doubles
+    double num = 0.0;             // Number
+    float vec[4] = {0, 0, 0, 0};  // Vector (float components)
+    double vecd[4] = {0, 0, 0, 0};// VectorD (double components, kept exact)
     uint32_t index = 0;           // String idx / Import id / Closure child proto
     uint64_t integer = 0;         // Integer (magnitude; sign in neg)
     bool neg = false;
@@ -122,13 +122,16 @@ struct ParseError : std::runtime_error {
 Module parse(const uint8_t* data, size_t size);
 
 // Byte offset of every instruction HEADER word in a serialized LBC blob
-// (AUX words excluded). Used for opcode-numbering conversion.
-std::vector<size_t> codeWordOffsets(const uint8_t* data, size_t size);
+// (AUX words excluded). `openc` is the numbering currently stored in the
+// blob's opcode bytes. Used for opcode-numbering conversion and audit.
+std::vector<size_t> codeWordOffsets(const uint8_t* data, size_t size,
+                                    OpEnc openc = OpEnc::Canon);
 
-// Rewrite the opcode byte of every instruction header word between the
-// canonical and wire numberings — the transform luau_load applies at load,
-// applied here at the container layer (Roblox containers hold wire ops).
-void convertOps(uint8_t* data, size_t size, bool toWire);
+// Rewrite the opcode byte of every instruction HEADER word from one
+// numbering to another. AUX words are never touched. This mirrors the
+// canonical<->wire transform used by the Roblox container pipeline; the
+// in-binary wire->vmop rewrite happens inside luau_load, not here.
+void convertOps(uint8_t* data, size_t size, OpEnc from, OpEnc to);
 
 // ---------------------------------------------------------------------------
 // Pretty printer: dumps the module with constant-aware disassembly of every

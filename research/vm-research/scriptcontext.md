@@ -183,6 +183,18 @@ source compilation is not part of this path.**
 
 ### The admission predicate (`sub_10159502e` + `FUN_1015c4980` + `FUN_10144ef5e`)
 
+**Polarity correction (verified from the disassembly at `0x101595142`):**
+`FUN_1015c4980` and `FUN_10144ef5e` return **0 = allowed, 1 = blocked**.
+`sub_10159502e` treats a nonzero predicate result as "detected as
+malicious" and returns 0 (deny); `startScript` proceeds only when
+`sub_10159502e` returns nonzero. Consequences:
+
+- **No predicate installed is fail-closed:** `FUN_1015c4980` returns 1,
+  which the caller treats as blocked. The old "no predicate = allow-all"
+  reading was inverted.
+- The set at `predicate+0x1a8` is a **blocked/malicious set**, not an
+  allowlist. A hit returns 1 and logs "detected as malicious".
+
 ```
 sub_10159502e(ctx, request):
   1. if script->+0x110 (RunContext enum) == 3:
@@ -191,23 +203,34 @@ sub_10159502e(ctx, request):
   2. container check: normalize(script_owner) == normalize(ctx_owner) else DENY
   3. capability check FUN_1015c4980(ctx+0x488, request):
          perm sub-object at ctx+0x488; predicate object at +0x60;
-         NO predicate  -> ALLOW (returns 1)
-         predicate set -> FUN_10144ef5e(predicate, request)
-  4. on deny: optional telemetry (sampled: rand()%10000 < DAT_10752c870;
-     fields "scriptClass"/"script") and, if DAT_10752c858,
-     log "Script "{}" was blocked from being ran under a restricted container."
+         NO predicate  -> returns 1 (fail-closed / blocked)
+         predicate set -> returns FUN_10144ef5e(predicate, request)
+  4. if the predicate result is 0 (allowed), a second flag-gated window
+     (DAT_10752c840) re-checks (script_ver - CoreScript_cfg_ver) <= limit;
+     failure logs "Script "{}" was blocked from being ran under a
+     restricted container." and denies. If the predicate result is 1,
+     the "detected as malicious" telemetry path runs (sampled:
+     rand()%10000 < DAT_10752c870) and the request is denied.
 
-FUN_10144ef5e(predicate, request):
-  version gates against two config singletons (u16 version at +0x1b8,
-  limit at +0x1ba: deny if (script_ver − cfg_ver) > cfg_limit)
-  deny if script is a RobloxScript-class module (FUN_1014d24d4)
-  otherwise ALLOW iff the script key is in the allowlist at predicate+0x1a8
+FUN_10144ef5e(predicate, request):        # 0 = allowed, 1 = blocked
+  diffA = u32(script_ver) - u32(cfgA.version)      # cfgA = CoreScript config
+  if (diffA <= cfgA.limit) return 0;               # early allow
+  if (request->script != null) {
+      diffB = u32(script_ver) - u32(cfgB.version)  # cfgB = ModuleScript config
+      if (diffB <= cfgB.limit && is_roblox_script_class(script))
+          return 0;                                # early allow
+  }
+  return key_in_blocked_set(predicate+0x1a8);
 ```
 
-So the "restricted container" story is: predicate object present → deny
-RobloxScript-class scripts and anything not in the allowlist, subject to
-schema-version gates. Scripts in unrestricted containers run with no
-predicate installed.
+The version expression is `(script_ver - cfg_ver) <= cfg_limit` (u32
+subtract, u16 loads), not `>`. The two configs are the CoreScript and
+ModuleScript singletons created by `FUN_1004c9be8` / `FUN_100537686`.
+The security story is therefore: a predicate is mandatory for scripts to
+run (fail-closed); it early-allows scripts within the CoreScript version
+window, early-allows RobloxScript-class scripts within the ModuleScript
+window, and otherwise consults a blocked set. The additional CoreScript
+window in `sub_10159502e` can still block an early-allowed script.
 
 ---
 
@@ -219,7 +242,7 @@ Per-VM module state (tracked via `FUN_10158eb34`/`FUN_1014d19f8`), states:
 |-------|---------|---------------------|
 | 1 | ready | If the requiring script is part of a cycle (`FUN_1014d17fc`/`FUN_1014d1d36` over the require chain held weakly at `vm+0x88/+0x90`): allowed **only** for export-based modules (`FUN_1014d190e`); otherwise fatal `"Requested module was required recursively. To allow circular dependencies, all modules in the cycle must use `export` instead of `return`"`. Returns the module value. |
 | 2 | error | fatal: sub-kind `FUN_1014d19ee` → `"Requested module experienced an error while loading"` or `"Module code did not return exactly one value"` |
-| 3 | pending | `FUN_1014d18fa(state) == −1` → resolve the weak reference: its target must be type `LUA_TFUNCTION` (7) else fatal; call it; a `nil` result means `FUN_10158dae2` cleanup + fatal `"Requested module has been destroyed and can no longer be required"`; otherwise the value is returned. `!= −1` → value already materialized. |
+| 3 | pending | `FUN_1014d18fa(state) == −1` → resolve the weak reference: its target must be type `LUA_TFUNCTION` (7) else fatal `"Weak module reference is expected to resolve to a table"` (the message says table, the check is function); call it; a `nil` result means `FUN_10158dae2` cleanup + fatal `"Requested module has been destroyed and can no longer be required"`; otherwise the value is returned. `!= −1` → value already materialized. |
 | other | — | fatal `"Unknown module state: %d"` |
 
 Additional rules verified in the entry path:
@@ -229,12 +252,17 @@ Additional rules verified in the entry path:
   `"cannot require '{}': .config modules are configuration scripts and cannot
   be required directly"` (gated by `DAT_10752c0a0`; telemetry via
   `DAT_10752c828`).
-- **RobloxScript context isolation** (only when the requiring script is not
-  itself RobloxScript-class per `FUN_101543e94`): requiring a RobloxScript
-  module from a non-RobloxScript context — and vice versa — is a fatal error
-  (`"Cannot require a non-RobloxScript module from a RobloxScript"` /
-  `"Cannot require a RobloxScript module from a non RobloxScript context"`),
-  gated by a name-property check (`FUN_1016fb2ae(name, 8)`).
+- **RobloxScript context isolation**: `FUN_101543e94()` returns
+  `*(uint8_t*)(facet+0x3d)` (the facet comes from `FUN_101543ea6` at
+  `lane+0x8b8`). If that byte is nonzero, both cross-context checks are
+  skipped. Otherwise `FUN_1015c63f7` reads the requiring script's name
+  property and `FUN_1016fb2ae(name, 8)` tests bit 8 of a property bitset:
+  - bit set → requiring a **non-RobloxScript** module is fatal
+    (`"Cannot require a non-RobloxScript module from a RobloxScript"`);
+  - bit clear → requiring a **RobloxScript** module is fatal
+    (`"Cannot require a RobloxScript module from a non RobloxScript context"`).
+  The old note treated `FUN_101543e94` as the class check and missed the
+  reverse direction; both directions exist.
 - The requiring script's name is taken from the `std::string` at `script+0x70`
   (same field the resume FLog reads).
 
@@ -256,7 +284,7 @@ Additional rules verified in the entry path:
 | `0x10158afe8` | `startScript` |
 | `0x10159502e` | policy gate (container match + capabilities) |
 | `0x1015c4980` | capability dispatch (predicate at `ctx+0x488+0x60`) |
-| `0x10144ef5e` | restricted-container predicate (version gates + allowlist) |
+| `0x10144ef5e` | restricted-container predicate (version windows + blocked set); 0 = allowed, 1 = blocked |
 | `0x101593650` | load step / compilation cache (registry `Compilation_Cache_Key_Address`) |
 | `0x1015a81a8` | scheduler enqueue (queue at `ctx+0x208`) |
 | `0x10155445e` | bind thread to script (`script+0x150`) |

@@ -135,7 +135,7 @@ int cmdEncode(int argc, char** argv) {
     std::vector<uint8_t> body = readFile(path);
     if (body.empty()) return 1;
 
-    if (wireOps) lbc::convertOps(body.data(), body.size(), /*toWire=*/true);
+    if (wireOps) lbc::convertOps(body.data(), body.size(), OpEnc::Canon, OpEnc::Wire);
 
     std::vector<uint8_t> plain;
     if (useZstd) {

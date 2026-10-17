@@ -113,21 +113,33 @@ bool versionGate(uint16_t script_version, const ConfigLimits& cfg) {
     return diff <= static_cast<uint32_t>(cfg.limit);
 }
 
+bool restrictedPredicateBlocked(const AdmissionRequest& req, const AdmissionConfig& cfg) {
+    // FUN_10144ef5e, exact control flow. versionGate() is the u32 expression
+    // `(u16 script_ver - u16 cfg_ver) <= cfg_limit`.
+    if (versionGate(req.schema_version, cfg.cfgA)) return false; // early allow
+
+    if (req.script_present && versionGate(req.schema_version, cfg.cfgB) &&
+        req.is_roblox_script_class)
+        return false; // early allow
+
+    return req.in_blocklist;
+}
+
 bool admissionAllowed(const AdmissionRequest& req, const AdmissionConfig& cfg) {
     // Step 2: container equality (sub_10159502e).
     if (!req.owner_matches_context) return false;
 
-    // Step 3: capability dispatch (FUN_1015c4980): no predicate = allow-all.
-    if (!cfg.has_predicate) return true;
+    // Step 3: capability dispatch (FUN_1015c4980). No predicate is
+    // fail-closed: the helper returns 1, which the caller treats as blocked.
+    if (!cfg.has_predicate) return false;
+    if (restrictedPredicateBlocked(req, cfg)) return false;
 
-    // FUN_10144ef5e: two version gates (either failing denies outright).
-    if (!versionGate(req.schema_version, cfg.cfgA)) return false;
-    if (!versionGate(req.schema_version, cfg.cfgB)) return false;
-
-    // RobloxScript-class scripts are denied by the restricted-container
-    // predicate; everything else must be in the allowlist.
-    if (req.is_roblox_script_class) return false;
-    return req.in_allowlist;
+    // sub_10159502e's second, flag-gated version window (DAT_10752c840):
+    // only scripts with diffA > cfgA.limit pass; otherwise it logs the
+    // "blocked from being ran under a restricted container" message.
+    if (cfg.enforce_core_script_window && !versionGate(req.schema_version, cfg.cfgA))
+        return false;
+    return true;
 }
 
 StartOutcome StartScript::run(const AdmissionRequest& req, const AdmissionConfig& cfg,
@@ -164,30 +176,35 @@ StartOutcome StartScript::run(const AdmissionRequest& req, const AdmissionConfig
 // ---------------------------------------------------------------------------
 // require
 // ---------------------------------------------------------------------------
-void checkConfigModuleName(const std::string& name) {
-    if (name == ".config") {
+void checkConfigModuleName(const std::string& name, bool enforce) {
+    if (enforce && name == ".config") {
         // The binary formats the message with the module name; we keep the
         // literal template (the {} placeholder) exactly as stored.
         fatal(kMsgConfigNotRequireable);
     }
 }
 
-void checkCrossContext(RequireContextClass requirer, RequireContextClass module_class,
+void checkCrossContext(bool skip_context_checks, RequireContextClass requirer,
+                       RequireContextClass module_class,
                        const std::string& /*module_name*/) {
-    // The pair of checks only applies when the requirer is NOT
-    // RobloxScript-class; a RobloxScript requirer skips both.
-    if (requirer == RequireContextClass::RobloxScript) return;
-    if (module_class == RequireContextClass::RobloxScript)
+    // sub_10158dd88: FUN_101543e94()!=0 skips the pair; otherwise the
+    // requirer's name-property bit 8 selects which direction is fatal.
+    if (skip_context_checks) return;
+    if (requirer == RequireContextClass::RobloxScript &&
+        module_class != RequireContextClass::RobloxScript)
+        fatal(kMsgCrossNormalFromRobloxScript);
+    if (requirer != RequireContextClass::RobloxScript &&
+        module_class == RequireContextClass::RobloxScript)
         fatal(kMsgCrossRobloxScriptFromNormal);
-    // (requiring a normal module from a normal context is fine)
 }
 
 void requireModule(const ModuleRecord& module, bool module_in_cycle,
                    RequireContextClass requirer_class,
                    RequireContextClass module_class,
-                   const std::string& module_name) {
-    checkConfigModuleName(module_name);
-    checkCrossContext(requirer_class, module_class, module_name);
+                   const std::string& module_name,
+                   bool enforce_config_rule, bool skip_context_checks) {
+    checkConfigModuleName(module_name, enforce_config_rule);
+    checkCrossContext(skip_context_checks, requirer_class, module_class, module_name);
 
     switch (module.state) {
     case ModuleState::Ready:
@@ -201,9 +218,9 @@ void requireModule(const ModuleRecord& module, bool module_in_cycle,
         return;
 
     case ModuleState::Pending:
-        if (!module.weak_ref_resolves) {
-            fatal(kMsgModuleDestroyed);
-        }
+        if (!module.weak_ref_pending) return; // value already materialized
+        if (!module.weak_ref_is_function) fatal(kMsgWeakRefNotFunction);
+        if (module.weak_ref_returns_nil) fatal(kMsgModuleDestroyed);
         return; // weak ref resolves; value returned
 
     default: {

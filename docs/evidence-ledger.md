@@ -21,12 +21,13 @@ SHA-256 `ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47`.
 | Service roster, facet and method names, Luau markers, log lines | String table (883k entries), 761 log channels |
 | Hidden engine symbols | Shipped symtab: 2275 entries, no Lua, DataModel, or net code symbols; mostly standard-library type names |
 | Opcode numbering, pointer encodings, VM object layouts | Binary tables `T` (`0x1063bb686`) / `R` (`0x10648bb74`) and the decoder code `luaF_freeproto` (`0x102996918`), `Proto.source` decode (`0x102993f3c`) — see the [Luau VM encodings](luau-vm-encodings.md) page |
-| Interpreter handlers (CALL/RETURN/NAMECALL/GETIMPORT/FASTCALL/...), TValue layout, renumbered type tags, inline caches | Handler disassembly — see [Inside the Luau interpreter](luau-interpreter.md); the builtins table `0x1072d74e0` was cross-checked against compiled one-liners from the reference compiler |
+| Interpreter handlers (CALL/RETURN/NAMECALL/GETIMPORT/FASTCALL/...), TValue layout, type tags, inline caches | Handler disassembly — see [Inside the Luau interpreter](luau-interpreter.md); the builtins table `0x1072d74e0` was cross-checked against compiled one-liners from the reference compiler |
 | Script containers (RSB1): scramble, key recovery, XXH32 checksum, zstd payload | `FUN_1014b91b5` decode path, `FUN_103222533` checksum (its machine code was extracted and executed against the reproduction across a 1000+-case sweep) |
 | ScriptContext resume guard, admission chain, `require` state machine | `FUN_101556cb4`, `sub_10159502e`, `FUN_1015c4980`, `FUN_10144ef5e`, `sub_10158dd88` — see `research/vm-research/scriptcontext.md` |
 | RakNet datagram encryption (ChaCha20-Poly1305, custom framing) | `FUN_102d94458` (decrypt), `FUN_102d93dba`/`FUN_10293f84` (encrypt), primitives `FUN_101825740`/`FUN_10182539e` — see `research/vm-research/networking.md` |
 | LBC serialized-chunk format | Parsed and cross-validated against the reference `luau_load` (the reproduction's chunk reader reproduces its output exactly) |
-| Bytecode authentication (SigGuard): v1 auth trailer, SHA-256 payload digest, GF(2)-multilinear table MAC, telemetry, FFlag policy | Gate `FUN_1014bb465` (call site `0x1029aa242`), verifier `FUN_1014bb64e`, mode chain `FUN_1014bc1a8/bc7d4/bc832/bc174`, verdict `FUN_1014bc5c8`, packed tables `0x106207760` (header `47 59 4D 14`) — see [Luau VM lifecycle](luau-vm-lifecycle.md) and `research/vm-research/luau-load.md` |
+| Bytecode authentication (SigGuard): v1 auth trailer, SHA-256 payload digest, table MAC, telemetry, FFlag policy | Gate `FUN_1014bb465` (call site `0x1029aa242`), verifier `FUN_1014bb64e`, mode chain `FUN_1014bc1a8/bc7d4/bc832/bc174`, verdict `FUN_1014bc5c8`, packed tables `0x106207760` (8257 × 12-byte records, header `GYM\x14`) — see [Luau VM lifecycle](luau-vm-lifecycle.md), `research/vm-research/luau-load.md`, and the `sigguard` reproduction |
+| Binary audit | `vm-repro/tools/rbxaudit.cpp` re-checks the binary SHA-256, T/R, both dispatch tables, SigGuard blob, checksum machine code, and the gate call site |
 | Service membership | Binary names plus public Roblox API docs, labeled where used |
 
 ## Limits
@@ -51,3 +52,10 @@ These are unknowns, not oversights:
   the RakNet datagram header bit layout are still not claimed.
 - Helper names behind internal calls and per-build tunable values remain
   unmapped.
+- The ScriptContext admission polarity was corrected in this pass:
+  predicate result **0 = allowed, 1 = blocked**; no predicate is
+  fail-closed; `predicate+0x1a8` is a blocked set. The earlier site text
+  said the opposite.
+- The AEAD nonce suffix (`mbeR`/`mber`) is carried on the wire but is not
+  consumed by the primitives; only nonce bytes 0..8 enter the ChaCha state.
+  It is not a Poly1305-key domain separator.

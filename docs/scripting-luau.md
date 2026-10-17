@@ -12,7 +12,10 @@ This page is the catalog. The step-by-step walkthrough lives in
 1. **Write** — `Script`, `LocalScript`, `ModuleScript`, `CoreScript`.
 2. **Permission check** — `RunContext` (Server, Client, Plugin, Legacy),
    `RunClientScript` / `RunServerScript` capabilities, security identity,
-   ancestry, DataModel state. Decided by the admission predicate (`0x10142a7a6`).
+   ancestry, DataModel state. The capability check is `0x10142a7a6`
+   (reached through the script's run method); the separate
+   restricted-container admission is `0x10159502e` (predicate + version
+   window + blocked set; 0 = allowed, 1 = blocked).
 3. **Wrap** — source travels as `ProtectedString`, not a raw `char*`.
 4. **Load** — `LoaderFacet`: `addScript`, `removeScript`, `requireModule`,
    `loadModuleScriptFromInstance` / `FromAssetId` / `FromRbxLibraryPath`,

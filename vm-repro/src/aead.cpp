@@ -188,8 +188,9 @@ void polyFinal(PolyCtx& st, uint8_t tag[16]) {
 }
 
 void polyKey(uint8_t pk[32], const uint8_t nonce12[12], const uint8_t key[32]) {
-    // block 0: counter=0, FULL 12-byte nonce in words 13-15
-    uint32_t w[4] = {0, rd32le(nonce12), rd32le(nonce12 + 4), rd32le(nonce12 + 8)};
+    // Binary FUN_10183bed2: state[12..13] = 0 (64-bit counter 0),
+    // state[14..15] = nonce[0..8]. Only the first 8 nonce bytes are read.
+    uint32_t w[4] = {0, 0, rd32le(nonce12), rd32le(nonce12 + 4)};
     uint8_t blk[64];
     chachaBlock(blk, w, key);
     std::memcpy(pk, blk, 32);

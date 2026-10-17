@@ -25,8 +25,8 @@ the DataModel — illustrated with small, runnable C++ examples.
 | Image base | `0x100000000` |
 | SHA-256 | `ac9ad59b3aa3805bf2d1c89fb6ff9c7941bf2e57af17a81cbc26abe94a022c47` |
 
-Addresses in these notes are virtual addresses. For this build,
-file offset + `0x100000000` = virtual address.
+Addresses in these notes are virtual addresses. For `__TEXT`/`__DATA`,
+file offset + `0x100000000` = virtual address; `__LINKEDIT` differs.
 
 ## Engine map
 
@@ -116,10 +116,13 @@ and keeps shared ownership alive across callbacks. The waiting paths
 (`WaitingHybridScriptsJob` drain, `0x1015a8d94` / `0x1015a9249`) claim one resume flag, drain a
 bounded number of waiters, respect a deadline, and release each waiter.
 
-Permission is decided by the admission predicate (`0x10142a7a6`). Server scripts need the native
-`RunServerScript` capability. Client scripts need `RunClientScript`.
+The script capability check is `0x10142a7a6`. Server scripts need the native
+`RunServerScript` capability; client scripts need `RunClientScript`.
 Service location, ancestry, DataModel state, and plugin rules are checked
-as well. Lua code does not grant itself a higher level.
+as well. The separate restricted-container admission is `0x10159502e`
+(predicate result 0 = allowed, 1 = blocked; no predicate is fail-closed;
+`predicate+0x1a8` is a blocked set). Lua code does not grant itself a higher
+level.
 
 On the Luau side, `lua_newstate` (`0x10299fd5b`), the protected load
 boundary (`0x1029a9f36`), `ScriptContextResume` (`0x1015566d6`), and
@@ -136,7 +139,8 @@ the collection. Scripts borrow threads from it.
 Execution enters through a dispatch stub (`0x1029adfd3`) that checks the
 `singlestep` flag and jumps into one of two opcode tables —
 `0x1072d8a30` (single-step loop) or `0x1072d9230` (normal loop) — each
-with 93 handler slots in identical positions but separate handler copies.
+with 256 entries each; exactly 93 are non-null and they occupy the same
+vmop positions, but the two tables point at separate handler copies.
 The slots do not follow public Luau `LOP_*` order: the byte on disk is
 `wire = (227 * canonical) & 0xFF` and the byte the interpreter dispatches
 on is `T[wire]`, for a 256-byte permutation `T` at `0x1063bb686`. The

@@ -121,8 +121,9 @@ Verifier `FUN_1014bb64e`, step by step (decompile + raw disassembly, machine-ver
    to −1 when `DAT_10752be68 > 0`** (force-signed) → reject; v>0 → mode = v (event 903).
 3. **Mode gates:** mode < 0 → code **3**; mode > `DAT_10752be38` (max supported) → **4**;
    mode ≥ 2 → **5**. Only modes 0/1 are processed further.
-4. **Checkword:** `out[1] = u32[trailer + (mode==0)*8] ⊕ u32[trailer + (mode==0 ? 4 : 0x10)]`
-   (mode 0: words 2⊕1, mode 1: words 0⊕4).
+4. **Checkword:** `out[1] = u32[trailer+0] ⊕ u32[trailer + (mode==0 ? 0x10 : 4)]`
+   (mode 0: words 0⊕4; mode 1: words 0⊕1). Mode 1 additionally requires
+   `out[1] == 0x74171870` (code 9 otherwise).
 5. **Threshold branch** (`CMP [0x10752be20],2; SETGE; INC` → threshold = (be20≥2)+1):
    mode < threshold → *simple path* = hex(trailer) stashed into the out-record string,
    code **6** (reject). mode ≥ threshold → *full path*. Since threshold ≥ 1 always,
@@ -133,7 +134,8 @@ Verifier `FUN_1014bb64e`, step by step (decompile + raw disassembly, machine-ver
    verified; be20 ≥ 2 additionally rejects mode 1 (total-lockdown switch).
 6. **Full path:** hex(`trailer[0..0x18)`) stashed into the out-record; requires payload ≥
    `max(0x100, min(0x400, DAT_10752be08))` else code 1. Then `FUN_102f486bc(data,
-   payload_len, 0x20)` — SHA-256-family digest of the payload **without the trailer**,
+   payload_len, 0x20)` — SHA-256 digest of the payload **without the trailer**
+   (the wrappers at `0x102f8fa5c/8fc08/9109d` are OpenSSL SHA-256),
    hex-encoded (64 chars, builder `FUN_102f476ef`). Mode 0 skips the `0x74171870` word
    check (`CMP dword[RBX],0; JLE` before it); mode 1 requires `out[1] == 0x74171870`,
    else code **9**.
@@ -146,25 +148,28 @@ Verifier `FUN_1014bb64e`, step by step (decompile + raw disassembly, machine-ver
    - **Mode 1 → `FUN_1014bc5c8`** (only when `DAT_10752be50 == 1`; otherwise the arm
      leaves code 0 — automatic pass, i.e. this flag is the kill-switch for the whole
      signature check):
-     table MAC. Selector = `trailer[0..16)`; 16 rows are pulled from two `0x1000 × 16 B`
-     tables plus a pairwise cross-table, and the mixed 12-byte state is compared against
-     `sha256hex(payload)[4..16)`. The tables (8191 rows, 12→16-byte stride) are expanded
-     lazily (std::once flag `DAT_107a70198`) from the packed `0x1830c`-byte blob at
-     `0x106207760` into `0x20410` bytes (`FUN_1014bd3e4` → `bd60c/bd6aa/bd73a/bd81c`);
-     the blob starts `47 59 4D 14`. → 0 or **7**. Construction (`bd6aa`/`bd73a`): the
-     rows form a **GF(2)-multilinear MAC** — basis rows (single selector bits) come
-     from the packed blob, `row[n]` = XOR of the basis rows for each set bit of `n`,
-     and a second 0x1000-row table supplies pairwise cross-terms — the check value is
-     a fixed degree-2 boolean function of the 16 selector bytes.
+     table MAC. Selector = `trailer[0..16)`. Each selector byte indexes one row in
+     two `0x1000`-row tables (A/B), and set-bit pairs across selector positions
+     index a third `0x3C000`-row table (C); the mixed 12-byte state is compared
+     against `sha256hex(payload)[4..16)`. The packed `0x1830c`-byte blob at
+     `0x106207760` is **8257** 12-byte records (header `47 59 4D 14`); it expands
+     to `0x20410` bytes of 16-byte rows (T1), then A/B (`0x10000` bytes each) and
+     C (`0x3C0000` bytes) are built from it (`FUN_1014bd3e4` →
+     `bd60c/bd6aa/bd73a/bd81c`). → 0 or **7**. Construction: A rows are linear
+     in the bits of one selector byte (basis records `T1[1+8i+j]`); B rows are
+     within-byte pairwise terms; C rows are cross-position pairwise terms. The
+     result is a fixed degree-2 function of the 16 selector bytes. Reproduction:
+     `vm-repro/src/sigguard.cpp` (`loadPackedTables` / `expandTables` /
+     `computeMac`).
 8. **Code → verdict mapping** (opaque arithmetic over three tables):
    `pa9c=[9,9,1,0,2,5,2,0,5,2]@0x10621fa9c`,
    `paa6=[8,3,4,9,1,5,2,7,0,6]@0x10621faa6`,
    `fab0=[0x44FD,0x405E,0x945,0x4A6,0x4558,0x40B9,0x44B,0x40B9,0x4558,0x8EA]@0x10621fab0`;
    `uv5 = fab0[...]/7 − 0x9d`; the gate returns **1 (reject)** iff
-   `⌊uv5/2197⌋ ≠ 13·⌊uv5/28561⌋`. Per code: **0,1 → accept; 3,4,5,6,7,9 → reject**.
-   Codes 3,4,6,7 additionally clear bit 30 of `global+0x630` via `&= ~0x40000000` (the
-   only `and dword[reg+0x630], 0xbfffffff` in the binary, at `0x1014bb542`); code 5 does
-   not. `global+0x630` is a 28-bit counter (low bits) plus four flag bits (28–31); the
+   `⌊uv5/2197⌋ ≠ 13·⌊uv5/28561⌋`. Per code: **0,1,2 → accept; 3..9 → reject**.
+   Codes 3,4,6,7,9 additionally clear bit 30 of `global+0x630` via
+   `&= ~0x40000000` (the only `and dword[reg+0x630], 0xbfffffff` in the binary,
+   at `0x1014bb542`); codes 5 and 8 do not. `global+0x630` is a 28-bit counter (low bits) plus four flag bits (28–31); the
    flag bits are compared across global_States (e.g. `FUN_101544a36`), so the clear is
    observable elsewhere in the process.
 9. **Telemetry** `FUN_1014bbe64(ctx, code, bool)`: atomic counters in the SigGuard state
@@ -308,9 +313,9 @@ them in place; nothing upstream of `LuaVMLoad` does it. (Pass order in `luau-vm.
 | `0x1014bb64e` | verifier (mode chain + threshold + digest) |
 | `0x1014bc1a8` / `0x1014bc7d4` / `0x1014bc832` / `0x1014bc174` | mode detect / trailer magics / trailer locator |
 | `0x1014bc4aa` / `0x1014bc5c8` | mode-0 / mode-1 verdicts |
-| `0x1014bd3e4` (→ `bd60c`) | SigGuard table expander (`0x1830c` → `0x20410`) |
-| `0x106207760` | packed signature tables (8191 × 12 B, header `47 59 4D 14`) |
-| `0x102f486bc` / `0x102f476ef` | SHA-256-family digest → hex / hex builder |
+| `0x1014bd3e4` (→ `bd60c/bd6aa/bd73a/bd81c`) | SigGuard table expander: 8257 packed 12-byte records → T1 (`0x20410` bytes), A/B (`0x10000` each), C (`0x3C0000`) |
+| `0x106207760` | packed signature tables (8257 × 12 B = `0x1830C`, header `47 59 4D 14`) |
+| `0x102f486bc` / `0x102f476ef` | SHA-256 digest → hex / hex builder |
 | `0x105a4ee65` | SigGuard once-init (registers the "SigGuard" singleton) |
 | `0x1014bbe64` | telemetry counters |
 | `0x1014bb3c4/3da/3f0/406/41c/439` | per-global FFlag init stubs (defaults = 1) |

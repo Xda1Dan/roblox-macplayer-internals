@@ -67,8 +67,9 @@ clears bit 30 of `global+0x630`.
 | Requirement | Detail |
 |---|---|
 | Version gate | byte 0 in `3..14` (or `100`); type version `1..3` for v ≥ 4 |
-| Auth trailer | declared version **1**, 24 bytes at end−`0x18`; detected by `trailer[0..4]⊕trailer[20..24] == C4 32 6A <ver>` and `u32[len−0x28]⊕u32[len−0x20] == 0x946AC432` |
-| Checkword | trailer word0⊕word4 must equal `0x74171870` |
+| Auth trailer (v1) | declared version **1**, 24 bytes at end−`0x18`; detected by `trailer[0..4]⊕trailer[20..24] == C4 32 6A <ver>` |
+| Legacy trailer (v0) | detected by the secondary magic `u32[len−0x28]⊕u32[len−0x20] == 0x946AC432`; always rejected by the threshold |
+| Checkword | for the v1 trailer, `u32(trailer[0..4]) ⊕ u32(trailer[4..8])` must equal `0x74171870` |
 | Signature | the trailer's first 16 bytes, mixed through the table MAC, must equal bytes `[4..16)` of `sha256hex(payload)` |
 
 Unauthenticated and legacy-v0 blobs take the verifier's "simple path" and
@@ -79,23 +80,23 @@ untouched (those are the loader's error-message chunks).
 
 ### How the signature is checked
 
-1. The payload (blob minus trailer) is digested by a SHA-256-family hash
-   (`FUN_102f486bc`, 32-byte state, algo id `0x20`) and hex-encoded
-   (64 characters).
-2. The trailer's first 16 bytes select rows from a 132 KB table set
-   (8191 × 16-byte rows, packed in the `0x1830c`-byte binary blob at
-   `0x106207760`, expanded lazily on first use). The rows form a
-   **GF(2)-multilinear MAC**: basis rows correspond to single selector
-   bits, `row[n]` is the XOR of the basis rows for each set bit of `n`,
-   and a second table supplies pairwise cross-terms — the check value is
-   a fixed degree-2 boolean function of the selector bytes.
+1. The payload (blob minus trailer) is digested by SHA-256
+   (`FUN_102f486bc` → OpenSSL `SHA256_Init/Update/Final`, 32-byte state)
+   and hex-encoded (64 characters).
+2. The trailer's first 16 bytes select rows from a table set packed in the
+   `0x1830c`-byte binary blob at `0x106207760` (**8257** 12-byte records,
+   header `GYM\x14`, expanded lazily on first use). Expansion builds T1
+   (`0x20410` bytes of 16-byte rows), two `0x1000`-row tables A/B, and a
+   `0x3C000`-row cross table C. The result is a fixed degree-2 function of
+   the 16 selector bytes; reproduction in `vm-repro/src/sigguard.cpp`.
 3. The mixed 12-byte state must equal `sha256hex(payload)[4..16)`.
 
 A failed or weak blob is not silently dropped: the gate fires a telemetry
-event (`placeid`, `version`, `code` ∈ {901 = no trailer, 902 = v0 trailer,
-903 = v1 trailer on a weak path}, `decrcc`, `declocal`), runs an
-anti-tamper fence, and clears bit 30 of `global+0x630` (a 28-bit counter
-plus four flag bits, so the clear is observable by other subsystems).
+event (fields `placeid`, `version`, `code`; the mode chain uses events
+901/902/903, `decrcc`, `declocal`), runs an anti-tamper fence, and clears
+bit 30 of `global+0x630` (a 28-bit counter plus four flag bits, so the
+clear is observable by other subsystems). The clear applies to verifier
+codes 3,4,6,7,9; codes 5 and 8 do not clear it.
 
 ### Configuration
 

@@ -2,6 +2,7 @@
 // Format provenance: include/rbxvm/lbc.hpp header comment.
 #include "rbxvm/lbc.hpp"
 
+#include "rbxvm/opcode.hpp"
 #include "rbxvm/scramble.hpp"
 
 #include <cmath>
@@ -120,11 +121,7 @@ Constant readConstant(Reader& r) {
         break;
     }
     case Constant::Kind::VectorD:
-        c.vecd = true;
-        for (int i = 0; i < 4; ++i) {
-            double d = r.f64();
-            c.vec[i] = float(d);
-        }
+        for (int i = 0; i < 4; ++i) c.vecd[i] = r.f64();
         break;
     default:
         throw ParseError("unknown constant kind", r.off);
@@ -135,7 +132,20 @@ Constant readConstant(Reader& r) {
 } // namespace
 
 namespace {
-Module parseImpl(Reader& r, std::vector<size_t>* codeOffsets) {
+
+// Canonical opcode for a stored opcode byte in the given numbering. Returns
+// kOpcodeCount when the byte is not a valid opcode.
+uint8_t canonicalOp(uint8_t byte, OpEnc openc) {
+    uint8_t canon = 0;
+    switch (openc) {
+    case OpEnc::Canon: canon = byte; break;
+    case OpEnc::Wire: canon = vmopToCanon(wireToVmop(byte)); break;
+    case OpEnc::Vmop: canon = vmopToCanon(byte); break;
+    }
+    return canon;
+}
+
+Module parseImpl(Reader& r, OpEnc openc, std::vector<size_t>* codeOffsets) {
     Module m;
     m.version = r.u8();
     if (m.version == 0) throw ParseError("bytecode carries an error message (version 0)", r.off);
@@ -188,10 +198,21 @@ Module parseImpl(Reader& r, std::vector<size_t>* codeOffsets) {
         }
 
         uint32_t sizecode = r.varint();
+        const size_t codeStart = r.off;
         p.code.resize(sizecode);
-        for (uint32_t j = 0; j < sizecode; ++j) {
-            if (codeOffsets) codeOffsets->push_back(r.off); // op byte = first LE byte
-            p.code[j] = r.u32();
+        for (uint32_t j = 0; j < sizecode; ++j) p.code[j] = r.u32();
+
+        if (codeOffsets) {
+            // Walk instruction headers using the numbering stored in the blob;
+            // AUX words are skipped, never treated as headers.
+            uint32_t pc = 0;
+            while (pc < sizecode) {
+                codeOffsets->push_back(codeStart + size_t(pc) * 4);
+                uint8_t canon = canonicalOp(uint8_t(p.code[pc] & 0xff), openc);
+                uint32_t words = (canon < kOpcodeCount) ? getOpLength(canon) : 1;
+                if (words == 0) words = 1;
+                pc += words;
+            }
         }
 
         uint32_t sizek = r.varint();
@@ -264,21 +285,34 @@ Module parseImpl(Reader& r, std::vector<size_t>* codeOffsets) {
 
 Module parse(const uint8_t* data, size_t size) {
     Reader r{data, size, 0};
-    return parseImpl(r, nullptr);
+    return parseImpl(r, OpEnc::Canon, nullptr);
 }
 
-std::vector<size_t> codeWordOffsets(const uint8_t* data, size_t size) {
+std::vector<size_t> codeWordOffsets(const uint8_t* data, size_t size, OpEnc openc) {
     Reader r{data, size, 0};
     std::vector<size_t> offsets;
-    parseImpl(r, &offsets);
+    parseImpl(r, openc, &offsets);
     return offsets;
 }
 
-void convertOps(uint8_t* data, size_t size, bool toWire) {
-    std::vector<size_t> offsets = codeWordOffsets(data, size);
+namespace {
+uint8_t encodeOp(uint8_t canonical, OpEnc openc) {
+    switch (openc) {
+    case OpEnc::Canon: return canonical;
+    case OpEnc::Wire: return canonToWire(canonical);
+    case OpEnc::Vmop: return canonToVmop(canonical);
+    }
+    return canonical;
+}
+} // namespace
+
+void convertOps(uint8_t* data, size_t size, OpEnc from, OpEnc to) {
+    if (from == to) return;
+    std::vector<size_t> offsets = codeWordOffsets(data, size, from);
     for (size_t off : offsets) {
-        uint8_t& op = data[off];
-        op = toWire ? canonToWire(op) : vmopToCanon(wireToVmop(op));
+        uint8_t canon = canonicalOp(data[off], from);
+        if (canon >= kOpcodeCount) continue; // leave unknown bytes untouched
+        data[off] = encodeOp(canon, to);
     }
 }
 
@@ -310,7 +344,7 @@ std::string escape(const std::string& s) {
 }
 
 std::string constText(const Module& m, const Constant& c) {
-    char buf[64];
+    char buf[160];
     switch (c.kind) {
     case Constant::Kind::Nil: return "nil";
     case Constant::Kind::Boolean: return c.b ? "true" : "false";
@@ -344,8 +378,8 @@ std::string constText(const Module& m, const Constant& c) {
         return buf;
     }
     case Constant::Kind::VectorD: {
-        std::snprintf(buf, sizeof buf, "vectord(%.6g, %.6g, %.6g, %.6g)", c.vec[0], c.vec[1],
-                      c.vec[2], c.vec[3]);
+        std::snprintf(buf, sizeof buf, "vectord(%.17g, %.17g, %.17g, %.17g)", c.vecd[0],
+                      c.vecd[1], c.vecd[2], c.vecd[3]);
         return buf;
     }
     case Constant::Kind::TableWithConstants: {
@@ -353,8 +387,9 @@ std::string constText(const Module& m, const Constant& c) {
         return buf;
     }
     case Constant::Kind::Integer: {
-        long long v = c.neg ? -(long long)c.integer : (long long)c.integer;
-        std::snprintf(buf, sizeof buf, "i64 %lld", v);
+        // Two's-complement negation, matching lvmload.cpp (safe for 2^63).
+        const int64_t v = c.neg ? int64_t(~c.integer + 1) : int64_t(c.integer);
+        std::snprintf(buf, sizeof buf, "i64 %lld", (long long)v);
         return buf;
     }
     case Constant::Kind::ClassShape: {
@@ -413,12 +448,13 @@ std::string dump(const Module& m, OpEnc openc) {
                 o += " ; ";
                 o += constText(m, p.k[size_t(k)]);
             };
-            // line number
+            // Line number: lineinfo is indexed by WORD position, not by
+            // instruction count (AUX words have their own entry).
             int lineNo = -1;
-            if (p.hasLineInfo && size_t(idx) < p.lineinfo.size()) {
-                uint32_t interval = p.linegaplog2 < 32 ? uint32_t(idx) >> p.linegaplog2 : 0;
+            if (p.hasLineInfo && i < p.lineinfo.size()) {
+                uint32_t interval = p.linegaplog2 < 32 ? uint32_t(i) >> p.linegaplog2 : 0;
                 if (interval < p.abslineinfo.size())
-                    lineNo = p.abslineinfo[interval] + int(p.lineinfo[idx]);
+                    lineNo = p.abslineinfo[interval] + int(p.lineinfo[i]);
             }
 
             unsigned words = disassembleOne(p.code.data(), p.code.size(), i, openc, &pctx, line);

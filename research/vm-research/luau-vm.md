@@ -20,8 +20,8 @@ Companion files: `opcode-map.csv` (all 93 opcodes, verified) · `dump-crosscheck
 asset bytes ──▶ FUN_1014b91b5        container decoder (RSB1; see the section below)
                  sub_101593650        compilation cache ("Compilation_Cache_Key_Address")
                  LuaVMLoad 0x1029a9f36 ──▶ luaD_rawrunprotected 0x102995084
-                 luau_load 0x1029aa05a     ──▶ FUN_1014bb465 integrity gate (on the
-                         │                     decoded LBC blob, see below)
+                 luau_load 0x1029aa05a     ──▶ FUN_1014bb465 SigGuard gate (on the
+                         │                     decoded LBC blob; see luau-load.md)
                          │                 decode opcodes (see below) ──▶ Proto + Closure
                          │
                  ScriptContext::startScript 0x10158afe8   (policy gate sub_10159502e,
@@ -43,14 +43,15 @@ asset bytes ──▶ FUN_1014b91b5        container decoder (RSB1; see the sect
                                              └─ Path A or Path B (see Interpreter)
 ```
 
-**Pipeline correction (was wrong here earlier):** the "integrity gate"
-`FUN_1014bb465` is NOT a pre-decoder step — its only caller is `luau_load`
-(`0x1029aa05a`), which invokes it as `FUN_1014bb465(L, chunkname, data, size)`
-on the already-decoded LBC blob *before* deserialization, and only proceeds
-when it does not return 1. It is an obfuscated predicate (VMP-style opaque
-arithmetic with table lookups at `DAT_10621fa9c`/`DAT_10621faa6`); on its
-failure path it clears bit 30 of `*(L + 0x18) + 0x630`. The container decode
-itself happens in `FUN_1014b91b5` before `LuaVMLoad` is ever called.
+**Pipeline correction:** the "integrity gate" `FUN_1014bb465` is NOT a
+pre-decoder step — its only caller is `luau_load` (`0x1029aa05a`), which
+invokes it as `FUN_1014bb465(L, chunkname, data, size)` on the already-decoded
+LBC blob *before* deserialization, and only proceeds when it returns 0. It is
+the **SigGuard** bytecode-auth verifier: a mode chain, a SHA-256 payload
+digest, and a table MAC (packed tables at `0x106207760`). On its failure path
+it clears bit 30 of `*(L + 0x18) + 0x630`. The container decode itself happens
+in `FUN_1014b91b5` before `LuaVMLoad` is ever called. Full pipeline:
+`luau-load.md` §3.2; reproduction: `vm-repro/include/rbxvm/sigguard.hpp`.
 
 `startScript` also logs `[FLog::ScriptContext] Running script %p`; `ScriptContextResume`
 logs `Resuming script: %p` and `Pending script name: %s`. On load failure the error goes
@@ -548,24 +549,28 @@ The register-machine loop was walked handler-by-handler; the full guided tour
 lives in `../roblox-macplayer-internals/docs/luau-interpreter.md`. Findings
 that correct or extend the layouts above:
 
-### TValue layout (correction — not previously documented)
+### TValue layout
 
 ```text
-offset  0        8        12   13      14
-        value(8) | vec z  | tt | marked| memcat     (16 bytes total)
+offset  0        8        12
+        value(8) | extra  | tt        (16 bytes total)
 ```
 
-- `value` = double, GC pointer, or **three floats** (this build uses
-  3-component vectors — `LUA_VECTOR_SIZE = 3` — which is why the tag sits at
-  byte 12).
-- The tag is read/written as a **dword at +0xc** (`LOADN` writes `0x3`;
-  `GETTABLEKS`/`NAMECALL` compare the whole dword).
-- Type tags are **renumbered**: `STRING = 6`, `TABLE = 7`, `FUNCTION = 8`
-  (open-source: 5/6/7). `NIL/BOOLEAN/NUMBER` match upstream (0/1/3).
-  Handlers mask tags with `& 0xf` — the tag byte's high nibble carries flags.
-- `LuaNode` = `{ TValue val @0; TValue key @16 }` — **val first** (upstream is
-  key-first), 32-byte stride confirmed by the slow-path slot arithmetic
-  (`(node - nodes) >> 5`).
+- `value` = double, GC pointer, or the first two floats of a 3-component
+  vector; the third component lives in `extra` (`LUA_VECTOR_SIZE = 3`,
+  `LUA_VECTOR_DOUBLE = 0` — the same configuration as the reference tree).
+- The tag is a **dword at +0xc** (`LOADN` writes `0x3`;
+  `GETTABLEKS`/`NAMECALL` compare the whole dword). `marked`/`memcat` are
+  GC-header fields, not TValue fields.
+- Type tags are the **reference-tree numbering for this configuration**:
+  `NIL=0, BOOLEAN=1, LIGHTUSERDATA=2, NUMBER=3, INTEGER=4, VECTOR=5,
+  STRING=6, TABLE=7, FUNCTION=8, USERDATA=9, THREAD=10, BUFFER=11,
+  CLASS=12, OBJECT=13`. (Earlier notes called this a Roblox renumbering;
+  it matches upstream `lua.h` with `LUA_VECTOR_DOUBLE=0`.)
+  Handlers mask tags with `& 0xf`; the tag byte's high nibble carries flags.
+- `LuaNode` = `{ TValue val @0; TKey key @16 }` — val first, matching the
+  reference tree's `LuaNode`; 32-byte stride confirmed by the slow-path slot
+  arithmetic (`(node - nodes) >> 5`).
 
 ### Register map (Path B)
 
@@ -637,9 +642,10 @@ current or dead thread (`cannot cancel thread`), else `lua_resetthread` or sched
 - **`ci+0x28`** is read as `nresults`; whether it packs additional state is unconfirmed.
 - **Alternate decoder branch** (`FUN_1014b96b3`, taken when `DAT_10752c0a0 != 0`) not yet
   analyzed; the main paths above are fully characterized.
-- **`FUN_1014bb465`** is characterized functionally (obfuscated predicate called from
-  `luau_load` on the LBC blob; failure clears bit 30 at `*(L+0x18)+0x630`) but the obfuscated
-  arithmetic (opaque expressions over `DAT_10621fa9c`/`DAT_10621faa6` lookups) is not deobfuscated.
+- ~~**`FUN_1014bb465`** is characterized functionally...~~ **Resolved:** the gate is
+  SigGuard (mode chain + SHA-256 + table MAC); see `luau-load.md` §3.2 and the
+  `sigguard` reproduction. Verdict mapping accepts codes 0/1/2 and rejects 3..9;
+  bit 30 is cleared for codes 3,4,6,7,9.
 - ~~Asset-pipeline callers of the container decoder~~ resolved: `FUN_1014c83e8` (`require`),
   `sub_101593650` (compilation cache), `FUN_1015890ee`, `FUN_10158d468`, `FUN_101549288`,
   `FUN_1015925f4` (confirmed via xrefs).

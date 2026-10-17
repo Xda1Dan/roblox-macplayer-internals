@@ -96,7 +96,9 @@ wire:  [ plaintext header (AAD) ][ ciphertext ][ 8B (seq + 0x754E657571696E55) ]
 
 ```
 init(ctx64, nonce12, key32):                       # FUN_10183bdf2 → FUN_10183bed2
-    state = "expand 32-byte k" | key32 | counter=0 | nonce12 (full 12B, words 13-15)
+    state = "expand 32-byte k" | key32 |
+            words12-13 = 0 (64-bit counter 0) |
+            words14-15 = nonce12[0..8]             # ONLY the first 8 nonce bytes
     ctx = ChaCha20_block(state)                    # 64 bytes at counter 0
     poly_key = ctx[0..32];  (ctx[32..64] unused)
     wipe state
@@ -104,7 +106,7 @@ init(ctx64, nonce12, key32):                       # FUN_10183bdf2 → FUN_10183
 payload keystream:                                 # FUN_10183be17 → FUN_10183bfc7
     state = "expand 32-byte k" | key32 |
             word12 = counter & 0xFFFFFFFF (starts at 1!) |
-            word13 = counter >> 32 (0 in practice) |
+            word13 = counter >> 32 |
             words14-15 = nonce12[0..8]             # ONLY the first 8 nonce bytes
     XOR len bytes from that counter onward
 
@@ -119,9 +121,12 @@ tag = Poly1305(poly_key,
   16-byte buffering; `FUN_10183546a` final — append 0x01, zero-pad,
   branchless ≥p reduce, add `s`, wipe 0x90-byte ctx). Multiply core:
   `FUN_101835607`.
-- The 4-byte nonce constants ("mbeR" recv / "mber" send) never enter the
-  *payload* keystream (which sees only nonce bytes 0..8) but DO enter the
-  Poly1305 key via block 0 — per-direction domain separators.
+- The 4-byte nonce suffix ("mbeR" recv / "mber" send) is **not consumed by
+  either primitive**: the counter-0 block and the payload keystream both read
+  only nonce bytes 0..8 (words 14-15). It is carried in the 12-byte nonce
+  buffer on the wire but does not affect the ciphertext or tag. Directional
+  separation comes from the key slots, not from the suffix. (Earlier notes
+  incorrectly said the suffix enters the Poly1305 key.)
 - Interface dispatch: Poly1305 thunks read a table at `0x1074d2438`
   (+0x10/+0x18/+0x20); the cipher dispatcher reads `0x1074d2480` (+0x08 init,
   +0x18 keystream, +0x20 variant).

@@ -1,63 +1,51 @@
-# Key Structures — RobloxPlayer (macOS)
+# Structures — verified fields (RobloxPlayer macOS, build f9247f9560044102)
 
-Field layouts recovered from decompilation. All offsets are from the object base.
+All offsets are object-relative and belong to **this build only**. The
+load-bearing VM layouts (`lua_State`, `CallInfo`, `Proto`, `Closure`,
+`TString`, `LuaTable`) are in `vm-research/luau-vm.md` and are mirrored as
+compile-time constants in `vm-repro/include/rbxvm/layouts.hpp`; they were
+recovered from `luaF_newproto`/`luaF_freeproto`, `lua_resetthread`,
+`luaS_newlstr`, and the interpreter entry sequence.
 
-> **Corrections (2026-10):** three fields in this file were corrected by the
-> ScriptContext deep dive (`vm-research/scriptcontext.md`):
-> 1. The "lifecycle level ≥ 3" facet gates are the **reverse**: the facet
->    (`ctx−0x888`) and scheduler queue (`lane+0xac0`) are valid while the phase
->    counter (`ctx+0xa18` / `lane+0x12a0`) is **< 3**; `≥ 3` is a fatal
->    `"Invalid Facet Access"`.
-> 2. ScriptContext `+0x28` is a **double execution-time accumulator**, not a
->    C-stack base/limit.
-> 3. The shutdown deadline lives in a **sub-object at `ctx+0x4b8`** (`+0x38`
->    deadline, `+0x40` bit0 shutdown-started), i.e. `ctx+0x4f0`/`ctx+0x4f8`
->    context-relative — the `+0x38/+0x40` rows below were that sub-object's
->    fields.
+This page only lists the ScriptContext/scheduler fields that the reproduction
+or the ScriptContext notes actually rely on. Fields marked *(narrative)* come
+from the broader site docs and were not re-verified in the cleanup pass.
 
-## ScriptContext / VM lane
+## ScriptContext (ctx)
 
-| Offset | Type | Meaning |
-|--------|------|---------|
-| `+0x00` | int | C-stack depth counter |
-| `+0x08` | uint64 | C-stack high-water mark |
-| `+0x18` | ptr | **vtable** (execution hooks `+0x640`, `+0x6a0`) |
-| `+0x20` | long | C-stack pointer |
-| `+0x28` | long | C-stack base / limit |
-| `+0x38` | double | shutdown deadline (wall clock) |
-| `+0x40` | byte | bit0 = shutdown started |
-| `+0x58` | byte | script state |
-| `+0x100` | ptr | parallel / VM-lane sub-object (state flag at `+0x515`) |
-| `+0xa18` | int | lifecycle level (must be ≥ 3 for facet access) |
-| `+0xac0` | ptr | **scheduler queue** (time-ordered coroutine queue) |
-| `+0x12a0` | int | lifecycle level (queue access gate, must be ≥ 3) |
-| `-0x888` | ptr | facet sub-object base |
+| Offset | Type | Meaning | Evidence |
+|--------|------|---------|----------|
+| `+0x28` | double | execution-time accumulator (outermost resumes) | `FUN_101556cb4` |
+| `+0x38` | u32 | `startScript` re-entrancy counter (>3 fatal) | `FUN_10158afe8` |
+| `+0x1a8` | u32 | startScript flags word (OR 4 when in the telemetry set) | `FUN_10158afe8` |
+| `+0x208` | queue | scheduler enqueue target | `FUN_10158afe8` → `sub_1015a81a8` |
+| `+0x488` | sub-object | permission sub-object; predicate pointer at `+0x60` | `FUN_1015c4980` |
+| `+0x4b8` | sub-object | shutdown state: `+0x38` deadline (double), `+0x40` bit0 started | `FUN_1015c486e` |
+| `+0x560` | set | script telemetry/registration set | `FUN_10158afe8` |
+| `+0x608` | map | script-name map | `FUN_10158afe8` |
+| `+0x8a8` | set | script registration set | `FUN_10158afe8` |
+| `+0xa18` | int | facet phase; `< 3` valid, `>= 3` fatal "Invalid Facet Access" | `FUN_101556664` |
+| `-0x888` | ptr | facet sub-object base (returned while phase `< 3`) | `FUN_101556664` |
 
-## Scheduler queue (at `lane + 0xac0`)
+The old `+0x38`/`+0x40` deadline rows were actually the `+0x4b8` sub-object's
+fields; the old `+0x28` "C-stack base/limit" row was the execution-time
+accumulator. The phase gates are valid while the counter is **below** 3, not
+above it.
 
-A time-ordered priority queue. Entries are 8 bytes (1 pointer each).
+## VM lane / scheduler
 
-| Offset | Type | Meaning |
-|--------|------|---------|
-| `+0x68` | ptr | queue begin |
-| `+0x70` | ptr | queue end |
+| Offset | Type | Meaning | Evidence |
+|--------|------|---------|----------|
+| `+0x8b8` | facet | facet object returned by `FUN_101543ea6` (fatal at phase `>= 3`) | `FUN_101543ea6` |
+| `+0xac0` | queue | scheduler queue (accessor gated the same way) | `FUN_1040d49da` |
+| `+0x12a0` | int | lane facet phase (`< 3` valid) | `FUN_1040d49da` |
 
-Each entry: `{scheduled_time (double), closure, args, flags}`. Insert computes
-`scheduled_time = delay + now` and inserts in time order.
+The queue's `+0x68`/`+0x70` begin/end pointers and the 8-byte entry shape are
+*(narrative)* from `docs/scheduler-internals.md`.
 
-## TaskScheduler Job object
+## Thread status byte (`thread + 0xac`)
 
-| Offset | Type | Meaning |
-|--------|------|---------|
-| `+0x00` | ptr | job vtable |
-| `+0x18` | std::string | **job name** (libc++ SSO: inline at `+0x19` if flag `&1==0`, else heap at `+0x28`) |
-| `+0x48` | double | accumulated / last time in job |
-| `+0x58` | byte | **state** |
-| `+0xe0` | int | timing / profiling counter |
-
-Job list (on the TaskScheduler object): begin `+0xd0`, end `+0xd8`, 16-byte entries.
-
-## Coroutine / thread state byte (`thread + 0xac`)
+Used by the scheduler layer (not part of `lua_State`):
 
 | Value | Meaning |
 |-------|---------|
@@ -66,49 +54,48 @@ Job list (on the TaskScheduler object): begin `+0xd0`, end `+0xd8`, 16-byte entr
 | `2` | deferred |
 | `3` | waiting |
 
-## TaskScheduler FVars (selection)
+## TaskScheduler job *(narrative)*
+
+| Offset | Type | Meaning |
+|--------|------|---------|
+| `+0x00` | ptr | job vtable |
+| `+0x18` | std::string | job name (libc++ SSO) |
+| `+0x48` | double | accumulated / last time in job |
+| `+0x58` | byte | state |
+| `+0xe0` | int | timing/profiling counter |
+
+Job list begin/end at `+0xd0`/`+0xd8` (16-byte entries) is *(narrative)*.
+
+## Scheduler FVars *(narrative)*
 
 `TaskSchedulerInit`, `TaskSchedulerRun`, `TaskSchedulerJobInitThreads`,
-`TaskSchedulerJobInGameThreads`, `TaskSchedulerJobDeadlineMs`, `TaskSchedulerMaxNumOfJobs`,
-`TaskSchedulerMaxNumOfArbiters`, `TaskSchedulerMaxStackSizeBytes`,
-`TaskSchedulerTaskMaxStackSizeBytes`, `TaskSchedulerTasksDefaultMaxCountPerCycle`,
+`TaskSchedulerJobInGameThreads`, `TaskSchedulerJobDeadlineMs`,
+`TaskSchedulerMaxNumOfJobs`, `TaskSchedulerMaxNumOfArbiters`,
+`TaskSchedulerMaxStackSizeBytes`, `TaskSchedulerTaskMaxStackSizeBytes`,
+`TaskSchedulerTasksDefaultMaxCountPerCycle`,
 `TaskSchedulerTasksDefaultMaxTimeMsPerCycle`, `TaskSchedulerAutoThreadLimit`,
-`TaskSchedulerThreadMin`, `TaskSchedulerTargetFps`, `TaskSchedulerBackgroundCycleRateMs`,
-`TaskSchedulerWatchThreads`.
+`TaskSchedulerThreadMin`, `TaskSchedulerTargetFps`,
+`TaskSchedulerBackgroundCycleRateMs`, `TaskSchedulerWatchThreads`.
 
-## Known TaskScheduler jobs
-
-- **Heartbeat** (`RunService.Heartbeat`) — `prof/Jobs/Heartbeat`
-- **Render** (`RenderJob`, `PreRenderJob`) — `Render Duty`, `Render FPS`, `Render Nominal FPS`
-- **Physics** (`StepPhysics`, `WorldRoot::StepPhysics`) — `PreSimulation`, `PostSimulation`, `PreAnimation`
-- **DataModel jobs** — `TextScraper…stepDataModelJob`, `DynamicTranslation…stepDataModelJob`,
-  `DataModelRecorderJob`, `LoadTestCoordinator`
-
-## RunService frame-loop events (ordered)
+## RunService event order *(narrative)*
 
 ```
-PreRender → RenderStepped → PreSimulation → Stepped (simulation) → PostSimulation → PreAnimation → Heartbeat
+PreRender → RenderStepped → PreSimulation → Stepped (simulation)
+          → PostSimulation → PreAnimation → Heartbeat
 ```
 
-## DataModel services (cleared on close)
+## DataModel services cleared on close *(narrative)*
 
-`Workspace`, `World`, `Lighting`, `Teams`, `ChatService`, `TextChatService`, `StarterGui`,
-`CoreGui`, `StarterPack`, `StarterPlayer`, `JointsService`, `ChangeHistoryService`,
-`ReplicatedFirst`, `ReplicatedStorage`, `RobloxReplicatedStorage`, `ServerStorage`,
-`ServerScriptService`, `BackendServerScriptService`, `BackendReplicatedStorage`,
-`BackendServerStorage`, `LocalizationService`, `TestService`
+`Workspace`, `World`, `Lighting`, `Teams`, `ChatService`, `TextChatService`,
+`StarterGui`, `CoreGui`, `StarterPack`, `StarterPlayer`, `JointsService`,
+`ChangeHistoryService`, `ReplicatedFirst`, `ReplicatedStorage`,
+`RobloxReplicatedStorage`, `ServerStorage`, `ServerScriptService`,
+`BackendServerScriptService`, `BackendReplicatedStorage`,
+`BackendServerStorage`, `LocalizationService`, `TestService`.
 
-## FVar / FLog systems
+## FVar / FLog *(narrative)*
 
-- **FVar register:** `func_0x000102f4a716(uint64_t* out_flag, int kind, char* name)`
-- **FVar registry init:** `sub_104c18388` (table at `0x10789f860`–`0x10789fa30`)
-- **Static name pointer table:** `0x1073b8040`
-- **FLog:** `func_0x000102f6fdf0(level, channel, format, …)`; fatal `func_0x000102f6d5d1(level, msg)`
-- **Opcode dispatch table:** `0x1072d9230` (256 entries)
-
-## ObjC startup
-
-`RobloxPlayerAppDelegate` / `RBXAppDelegate` (class-name strings `0x106bbdc6e` / `0x106bbdcc2`).
-`applicationDidFinishLaunching` → skip update → parse placeId → "Initializing lua app" →
-"Bind to services in game-engine" → "Launching game from web" → machine-id check →
-`reportClientStatus`.
+- FVar register: `0x102f4a716`; registry init: `sub_104c18388`; name table at
+  `0x1073b8040`.
+- FLog: `0x102f6fdf0`; fatal: `0x102f6d5d1`.
+- Opcode dispatch tables: `0x1072d8a30` (Path A) / `0x1072d9230` (Path B).

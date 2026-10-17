@@ -353,18 +353,18 @@ encoding directly: `stored = hash − (ts + 0x10)`.
 ### `TValue` — a single Lua value (16 bytes)
 
 ```text
-offset  0        8        12   13      14
-        value(8) | vec z  | tt | marked| memcat
+offset  0        8        12
+        value(8) | extra  | tt
 ```
 
-The value slot holds a `double`, a heap pointer, or **three floats** — this
-build uses 3-component vectors, which is why the type tag sits at byte 12.
-Handlers read and write the tag as a **dword at `+0xc`** (tag plus the
-`marked`/`memcat` bytes). The type tags themselves are renumbered in this
-build: `STRING = 6`, `TABLE = 7`, `FUNCTION = 8` (open-source Luau uses
-5/6/7); `NIL/BOOLEAN/NUMBER` match upstream (0/1/3), and handlers mask tags
-with `& 0xf` before comparing, so the high nibble carries flags. Verified
-from the `LOADN`, `GETTABLEKS` and `NAMECALL` handlers — see
+The value slot holds a `double`, a heap pointer, or the first two floats of a
+3-component vector; the third component lives in `extra`, which is why the
+type tag sits at byte 12. Handlers read and write the tag as a **dword at
+`+0xc`**. The tags match the reference tree at this configuration:
+`STRING = 6`, `TABLE = 7`, `FUNCTION = 8` (with `INTEGER = 4` and
+`VECTOR = 5` before them); `NIL/BOOLEAN/NUMBER` are 0/1/3. Handlers mask
+tags with `& 0xf` before comparing, so the high nibble carries flags.
+Verified from the `LOADN`, `GETTABLEKS` and `NAMECALL` handlers — see
 [Inside the Luau interpreter](luau-interpreter.md).
 
 ### `LuaTable` — size `0x30`

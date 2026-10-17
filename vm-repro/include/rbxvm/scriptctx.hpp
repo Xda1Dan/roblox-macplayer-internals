@@ -55,6 +55,8 @@ constexpr const char* kMsgModuleLoadError = "Requested module experienced an err
 constexpr const char* kMsgModuleNotOneValue = "Module code did not return exactly one value";
 constexpr const char* kMsgModuleDestroyed =
     "Requested module has been destroyed and can no longer be required";
+constexpr const char* kMsgWeakRefNotFunction =
+    "Weak module reference is expected to resolve to a table";
 constexpr const char* kMsgUnknownModuleState = "Unknown module state: %d";
 constexpr const char* kMsgConfigNotRequireable =
     "cannot require '{}': .config modules are configuration scripts and cannot be required directly";
@@ -135,6 +137,12 @@ void checkFacetPhase(const ScriptContextState& ctx);
 // startScript model (FUN_10158afe8 + sub_10159502e + FUN_1015c4980 +
 // FUN_10144ef5e). Only the verified decision logic is modeled; the object
 // bookkeeping (records, sets, refcounts) is represented by outcomes.
+//
+// Polarity (verified from sub_10159502e's disassembly):
+//   FUN_1015c4980 / FUN_10144ef5e return 0 = allowed, 1 = blocked.
+//   With no predicate installed, FUN_1015c4980 returns 1 (fail-closed).
+//   The set at predicate+0x1a8 is a BLOCKED/malicious set, not an allowlist:
+//   a hit returns 1 and the caller logs "detected as malicious".
 // ---------------------------------------------------------------------------
 enum class RunContext { Normal = 0, Shared = 3 }; // script+0x110 enum value 3 re-resolves
 
@@ -147,22 +155,37 @@ struct AdmissionRequest {
     RunContext run_context = RunContext::Normal;
     bool owner_matches_context = true;   // step 2: container equality
     bool script_level_run_ok = true;     // script vtable +0x320 bool
+    bool script_present = true;          // request->script != null (gate B is skipped if null)
     bool is_roblox_script_class = false; // FUN_1014d24d4
-    bool in_allowlist = false;           // predicate+0x1a8 membership
+    bool in_blocklist = false;           // predicate+0x1a8 membership (1 = blocked)
     uint16_t schema_version = 0;         // script+0x18 → +0x1b8
 };
 
 struct AdmissionConfig {
-    bool has_predicate = true;           // ctx+0x488 +0x60 != 0 (false = allow-all)
-    ConfigLimits cfgA{};                 // FUN_1004c9be8
-    ConfigLimits cfgB{};                 // FUN_100537686
+    bool has_predicate = true;           // ctx+0x488 +0x60 != 0 (false = fail-closed)
+    bool enforce_core_script_window = true; // DAT_10752c840: second version window
+    ConfigLimits cfgA{};                 // FUN_1004c9be8 (CoreScript config)
+    ConfigLimits cfgB{};                 // FUN_100537686 (ModuleScript config)
 };
 
-// The version gate: deny iff (script_version - cfg.version) > cfg.limit,
-// computed in u32 arithmetic exactly as the binary does (u16 loads, u32 subtract).
+// The version window predicate used by FUN_10144ef5e: true iff
+// (script_version - cfg.version) <= cfg.limit, all in u32 arithmetic.
 bool versionGate(uint16_t script_version, const ConfigLimits& cfg);
 
-// The full admission chain; false = blocked (restricted-container deny).
+// FUN_10144ef5e: true = blocked. Exact control flow:
+//   diffA = script_ver - cfgA.version
+//   if (diffA <= cfgA.limit) return false;                 // early allow
+//   if (script_present) {
+//       diffB = script_ver - cfgB.version
+//       if (diffB <= cfgB.limit && is_roblox_script_class) return false;
+//   }
+//   return in_blocklist;
+bool restrictedPredicateBlocked(const AdmissionRequest& req, const AdmissionConfig& cfg);
+
+// The full admission chain; false = blocked. Mirrors sub_10159502e:
+//   owner mismatch -> blocked; predicate result -> blocked; then the optional
+//   CoreScript version window (DAT_10752c840) can block an otherwise allowed
+//   script when diffA > cfgA.limit.
 bool admissionAllowed(const AdmissionRequest& req, const AdmissionConfig& cfg);
 
 // startScript control flow: re-entrancy accounting + load-step dispatch.
@@ -192,7 +215,12 @@ enum class ModuleErrorKind : int { LoadError = 0, NotOneValue = 1 };
 struct ModuleRecord {
     ModuleState state = ModuleState::Pending;
     bool export_based = false;                        // FUN_1014d190e
-    bool weak_ref_resolves = true;                    // the pending-state weak ref
+    // Pending-state weak-reference resolution (FUN_1014d18fa / FUN_102985ba1):
+    // state == -1 means "resolve now"; the target must be a function (tag 7),
+    // and a nil result means the module was destroyed.
+    bool weak_ref_pending = true;                     // FUN_1014d18fa(state) == -1
+    bool weak_ref_is_function = true;
+    bool weak_ref_returns_nil = false;
     ModuleErrorKind error_kind = ModuleErrorKind::LoadError;
 };
 
@@ -200,15 +228,22 @@ enum class RequireContextClass { Normal, RobloxScript };
 
 // Throws std::runtime_error with the binary's exact message on every fatal
 // path; returns normally when the require succeeds.
+// `enforce_config_rule` models the DAT_10752c0a0 gate around the ".config"
+// rejection; `skip_context_checks` models FUN_101543e94() != 0.
 void requireModule(const ModuleRecord& module, bool module_in_cycle,
                    RequireContextClass requirer_class,
                    RequireContextClass module_class,
-                   const std::string& module_name);
+                   const std::string& module_name,
+                   bool enforce_config_rule = true,
+                   bool skip_context_checks = false);
 
 // Precheck helpers (the entry-path rules), individually testable:
-void checkConfigModuleName(const std::string& name);              // ".config" rule
-void checkCrossContext(RequireContextClass requirer, RequireContextClass module,
-                       const std::string& module_name);           // RobloxScript isolation
+void checkConfigModuleName(const std::string& name, bool enforce = true); // ".config" rule
+// FUN_1016fb2ae(name, 8) derives the requirer's RobloxScript flag from a
+// name-property bitset; FUN_101543e94()!=0 skips both checks. The binary
+// checks both directions (the old model only had one).
+void checkCrossContext(bool skip_context_checks, RequireContextClass requirer,
+                       RequireContextClass module, const std::string& module_name);
 
 } // namespace sctx
 } // namespace rbxvm

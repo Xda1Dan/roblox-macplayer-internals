@@ -23,3 +23,6 @@ __pycache__/
 *.o
 *.a
 vm-repro/tests/rbx*-tests
+vm-repro/tools/rbxdis
+vm-repro/tools/rbxrsb1
+vm-repro/tools/rbxaudit

@@ -6,15 +6,16 @@
 
 ```
 Instance (Script / LocalScript / ModuleScript)
-  │  admission predicate — 0x10142a7a6
+  │  script capability check — 0x10142a7a6 (RunServerScript / RunClientScript)
   ▼
 source (ProtectedString) or bytecode asset
   │  compilation-cache boundary — 0x101593650
-  │  policy gate (restricted / malicious) — 0x10159502e
+  │  restricted-container admission — 0x10159502e
   ▼
 execution record
   │  init — 0x10158cc58
-  │  start path (re-entrancy ≤ 3, "Script Start" scope) — 0x10158ac46
+  │  start wrapper — 0x10158ac46 → startScript 0x10158afe8
+  │  (re-entrancy ≤ 3, "Script Start" scope, admission, load, enqueue)
   ▼
 VM collection thread
   │  creates/owns lua_State; lua_newstate — 0x1015b92cd / 0x10299fd5b
@@ -36,11 +37,13 @@ teardown — 0x1015a7d1e → 0x1015bab74
 
 ---
 
-## 1. Admission — `0x10142a7a6`
+## 1. Script capability check — `0x10142a7a6`
 
-**What it does:** answers “is this script allowed to start *here, now*?”
-before any VM is touched. RunContext, capability bits, ancestry, DataModel
-state, and plugin/core special cases all feed one boolean.
+**What it does:** answers "is this script allowed to start *here, now*?"
+before any VM is touched — capability bits and version windows, per
+RunContext. (The separate restricted-container admission, container equality
++ predicate + blocked set, is `0x10159502e` and runs inside
+`startScript`.)
 
 **Function card**
 
@@ -48,7 +51,8 @@ state, and plugin/core special cases all feed one boolean.
 |---|---|
 | entry | `0x10142a7a6` |
 | size | `0x3b9` bytes |
-| callers | script-start path, plugin restart path |
+| callers | `FUN_10142ac36` / `FUN_10142ae86` (script run wrappers); plugin restart path |
+| related | restricted-container admission: `0x10159502e` (inside `startScript`) |
 | emits | `Cannot start {client,server} script '%s' (lacking capability …)` |
 | covered here | permission dispatch and error lines |
 
@@ -106,18 +110,20 @@ bool admitsScript(const ScriptRecord& s, Ctxt& c) {
 
 ---
 
-## 2. Start — `0x10158ac46`
+## 2. Start — wrapper `0x10158ac46`, `startScript` `0x10158afe8`
 
-**What it does:** turns an admitted script into a running VM thread:
-log it, guard re-entrancy, open a profiling scope, build the VM-facing
-objects, invoke the start helper, install result/error continuations.
+**What it does:** `0x10158ac46` copies the request value-objects, takes
+shared ownership, and calls `startScript` (`0x10158afe8`). The re-entrancy
+gate, `Script Start` scope, admission, load step, and scheduler enqueue are
+inside `0x10158afe8`; the wrapper installs the result/error continuations
+after it returns.
 
 **Function card**
 
 | | |
 |---|---|
-| entry | `0x10158ac46` |
-| size | `0xc70` bytes |
+| wrapper entry | `0x10158ac46` |
+| startScript entry | `0x10158afe8` |
 | logs | `[FLog::ScriptContextAdd] LoaderFacet::addScript -- %s`, `Running script %p`, `Script Start` scope, `startScript re-entrancy has exceeded 3` |
 | covered here | start path, ownership, and continuations |
 
@@ -132,11 +138,12 @@ objects, invoke the start helper, install result/error continuations.
    null-check → self-check → virtual call at `+0x10` (copy) or `+0x18`
    (in-place construct). This triplicated pattern is the visual fingerprint
    of this function.
-4. Enforce `startDepth ≤ 3`, else fatal. Open the `Script Start` profile
-   region.
-5. Get/create the VM thread object, install thread state, call the VM
-   start helper, then branch: success installs yield/completion
-   continuation; failure publishes the script error.
+4. Call `startScript` (`0x10158afe8`), which enforces `startDepth ≤ 3`
+   (fatal otherwise), opens the `Script Start` profile region, runs the
+   restricted-container admission (`0x10159502e`), loads the chunk, and
+   enqueues the thread.
+5. Back in the wrapper: on success install the yield/completion
+   continuation; on failure publish the script error.
 
 **Assembly pattern — the triplicated resolver idiom (excerpt)**
 

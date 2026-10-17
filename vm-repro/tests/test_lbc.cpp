@@ -76,6 +76,34 @@ static void testParseFixture(const std::vector<uint8_t>& blob) {
           "K5 is a table-with-constants");
 }
 
+// AUX words must never be rewritten by convertOps. This is the regression
+// that the original implementation had (it treated every code word as a
+// header because it collected offsets while reading the raw word array).
+static void testConvertOpsSkipsAux(std::vector<uint8_t> blob) {
+    std::vector<size_t> headers = lbc::codeWordOffsets(blob.data(), blob.size(), OpEnc::Canon);
+    CHECK(!headers.empty(), "header offsets non-empty");
+
+    // Find a two-word instruction and scribble a nonzero low byte into its
+    // AUX word. That byte must survive convertOps untouched.
+    size_t auxOff = 0;
+    for (size_t h : headers) {
+        uint8_t canon = blob[h];
+        if (canon < kOpcodeCount && getOpLength(canon) == 2) {
+            auxOff = h + 4;
+            break;
+        }
+    }
+    CHECK(auxOff != 0, "found an AUX word");
+    if (!auxOff) return;
+    blob[auxOff] = 0x5A;
+
+    lbc::convertOps(blob.data(), blob.size(), OpEnc::Canon, OpEnc::Wire);
+    CHECK(blob[auxOff] == 0x5A, "AUX low byte survived canon->wire");
+
+    lbc::convertOps(blob.data(), blob.size(), OpEnc::Wire, OpEnc::Canon);
+    CHECK(blob[auxOff] == 0x5A, "AUX low byte survived wire->canon");
+}
+
 static void testFullPipeline(const std::vector<uint8_t>& canon) {
     using namespace rsb1;
 
@@ -85,7 +113,7 @@ static void testFullPipeline(const std::vector<uint8_t>& canon) {
 
     // 1. canonical -> wire ops (what the server ships inside the container)
     std::vector<uint8_t> wire = canon;
-    lbc::convertOps(wire.data(), wire.size(), /*toWire=*/true);
+    lbc::convertOps(wire.data(), wire.size(), OpEnc::Canon, OpEnc::Wire);
     // op bytes must differ somewhere (the scramble is non-identity)
     CHECK(wire != canon, "wire conversion changed bytes");
 
@@ -106,7 +134,7 @@ static void testFullPipeline(const std::vector<uint8_t>& canon) {
 
     // 5. and converting the wire blob back to canonical gives the same too
     std::vector<uint8_t> back = d.payload;
-    lbc::convertOps(back.data(), back.size(), /*toWire=*/false);
+    lbc::convertOps(back.data(), back.size(), OpEnc::Wire, OpEnc::Canon);
     lbc::Module m2 = lbc::parse(back.data(), back.size());
     const std::string dumpBack = lbc::dump(m2, OpEnc::Canon);
     CHECK(dumpBack == dumpCanon, "converted-back disassembly == canonical");
@@ -122,6 +150,7 @@ int main(int argc, char** argv) {
     CHECK(blob[0] == 14, "fixture version byte");
 
     testParseFixture(blob);
+    testConvertOpsSkipsAux(blob);
     testFullPipeline(blob);
 
     if (g_failures == 0) {

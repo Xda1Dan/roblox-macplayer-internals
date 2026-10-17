@@ -73,21 +73,22 @@ jmp  [r15 + opbyte*8]        ; go
 | `R15` | dispatch table | `0x1072d9230`, indexed by the raw opcode byte |
 | stack | `cl`, `k`, `L` | the Closure, the constant table, and the `lua_State` |
 
-A "register" is a **`TValue`** — 16 bytes, and this build lays it out as:
+A "register" is a **`TValue`** — 16 bytes, laid out as:
 
 ```text
-offset  0        8        12   13      14
-        +--------+--------+----+-------+----+
-        | value  | (vec z)| tt | marked| mem|
-        | 8 bytes|        |    |       |    |
-        +--------+--------+----+-------+----+
+offset  0        8        12
+        +--------+--------+--------+
+        | value  | extra  |  tt    |
+        | 8 bytes| 4 bytes| 4 bytes|
+        +--------+--------+--------+
 ```
 
-- `value` is either a `double`, a heap pointer (`GCObject*`), or three
-  floats — this build uses **3-component vectors**, so a vector value uses
-  bytes 0–11 and the type tag sits at byte 12.
-- The type tag is read and written as a **dword at +12** (type, then
-  `marked`/`memcat` bytes). For example `LOADN` writes the number and tags it:
+- `value` is either a `double`, a heap pointer (`GCObject*`), or the first
+  two floats of a 3-component vector — the third component lives in
+  `extra`, so a vector uses bytes 0–11 and the type tag sits at byte 12
+  (`LUA_VECTOR_SIZE = 3`, `LUA_VECTOR_DOUBLE = 0`).
+- The type tag is read and written as a **dword at +12**. For example
+  `LOADN` writes the number and tags it:
 
 ```asm
 ; LOADN A, D  →  registers[A] = (double)D
@@ -95,24 +96,31 @@ movsd [r10 + rcx], xmm0        ; the double, at offset 0
 mov  dword [r10 + rcx + 0xc], 0x3   ; tt = LUA_TNUMBER
 ```
 
-### A type-tag surprise
+### Type tags
 
-The type tags are **renumbered** in this build compared to open-source Luau.
-Confirmed from handlers:
+The tags match the reference Luau tree at this configuration
+(`LUA_VECTOR_DOUBLE=0`, so `INTEGER` and inline `VECTOR` occupy slots 4/5):
 
-| Type | open-source | this build |
-|---|---|---|
-| `NIL` | 0 | 0 |
-| `BOOLEAN` | 1 | 1 |
-| `NUMBER` | 3 | 3 |
-| `STRING` | 5 | **6** |
-| `TABLE` | 6 | **7** |
-| `FUNCTION` | 7 | **8** |
+| Type | value |
+|---|---|
+| `NIL` | 0 |
+| `BOOLEAN` | 1 |
+| `LIGHTUSERDATA` | 2 |
+| `NUMBER` | 3 |
+| `INTEGER` | 4 |
+| `VECTOR` | 5 |
+| `STRING` | 6 |
+| `TABLE` | 7 |
+| `FUNCTION` | 8 |
+| `USERDATA` | 9 |
+| `THREAD` | 10 |
+| `BUFFER` | 11 |
+| `CLASS` | 12 |
+| `OBJECT` | 13 |
 
-(low types match; the shift starts at `STRING`. The exact reason — likely a
-new internal type inserted before it — is not confirmed yet.) Handlers also
-mask tags with `& 0xf` before comparing, so the upper nibble of the tag byte
-carries flags, not type.
+Earlier notes called this a Roblox renumbering; it is the upstream numbering
+for this configuration. Handlers also mask tags with `& 0xf` before
+comparing, so the upper nibble of the tag byte carries flags, not type.
 
 ## Dispatch
 

@@ -5,12 +5,14 @@
 // Construction (verified against the binary's primitives; see
 // ../research/vm-research/networking.md for addresses):
 //
-//   init:    state = "expand 32-byte k" | key32 | counter=0 | nonce12 (words 13-15)
+//   init:    state = "expand 32-byte k" | key32 |
+//                    words12-13 = 0 (64-bit counter) |
+//                    words14-15 = nonce[0..8]
 //            poly_key = ChaCha20_block(state)[0..32]
 //   payload: state = "expand 32-byte k" | key32 |
 //                    word12 = counter & 0xFFFFFFFF (starts at 1) |
 //                    word13 = counter >> 32 |
-//                    words14-15 = nonce12[0..8]      (only the first 8 bytes!)
+//                    words14-15 = nonce[0..8]
 //            keystream = ChaCha20 blocks from that counter
 //   mac:     Poly1305(poly_key, aad||pad16||ct||pad16||len_aad(u64le)||len_ct(u64le))
 //
@@ -20,9 +22,11 @@
 //   client→server: [header = AAD][ct][8B seq+0x754E657571696E55][4B 0x7265626d][16B tag]
 //                  (28B trailer; the 12B before the tag are the nonce, on the wire)
 //
-// The two 4-byte constants never enter the payload keystream (which sees only
-// nonce bytes 0..8) but do enter the Poly1305 key via block 0 — they are
-// per-direction domain separators.
+// IMPORTANT: only nonce bytes 0..8 are read by the primitives. The 4-byte
+// suffix ("mbeR"/"mber") is carried in the nonce buffer but never reaches the
+// ChaCha state (both the counter-0 block and the payload blocks take an
+// 8-byte nonce). It therefore does NOT affect the ciphertext or the tag; the
+// per-direction separation comes from the key slots, not from the suffix.
 #pragma once
 
 #include <cstddef>
