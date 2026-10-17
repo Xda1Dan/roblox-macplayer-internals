@@ -23,7 +23,7 @@ source is reproduced.
 | LBC reader + constant-aware disassembly | **done, tested** | full compile→wire→container→decode→disassemble pipeline |
 | **SigGuard** bytecode auth (mode chain, SHA-256, table MAC) | **done, tested** | packed tables extracted from the binary; MAC cross-checked against an independent Python model |
 | Binary audit tool | **done** | re-checks tables/handlers/blob/checksum/gate call site against a real Mach-O |
-| `luau_load`-equivalent loader (Proto/Closure build) | next | the LBC reader is the parsing half |
+| `luau_load`-equivalent loader (Proto/Closure build) | **done, tested** (`src/loader.cpp` + `tests/test_loader.cpp`) — version gates, per-proto wire→vmop rewrite, injectable atom pass |
 | Interpreter core | planned | start with Path B |
 
 ## Layout
@@ -129,8 +129,8 @@ against an independent Python transcription for fixed selectors.
 
 ## Known limitations
 
-- The `luau_load` loader (Proto/Closure construction) is not implemented;
-  the LBC reader stops at the parsed module.
+- The interpreter is not implemented; loader IMPORT constants are kept as
+  ids (resolution needs the embedder's environment).
 - The interpreter is not implemented.
 - The AEAD key-derivation chain (X25519 → session keys) is not traced; the
   reproduction takes the 32-byte key as input.

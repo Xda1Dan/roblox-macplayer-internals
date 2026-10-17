@@ -236,6 +236,51 @@ window in `sub_10159502e` can still block an early-allowed script.
 
 ## `require` / the module state machine (`sub_10158dd88` @ `0x10158dd88`)
 
+### ModuleRecord — resolved layout (this build)
+
+Recovered from the write/read helpers (`FUN_1014d19c4/d6/e2`, the reader, and
+the executor wrappers):
+
+| Off | Type | Meaning |
+|-----|------|---------|
+| `+0x00` | u8 | **state** (1 = ready, 2 = error, 3 = pending/materializing) |
+| `+0x01` | u8 | error sub-kind (0 = load error, 1 = not-one-value) — `FUN_1014d19ee` |
+| `+0x02` | u8 | "export resolved" flag — read by `FUN_1014d1940`, set by `FUN_1014d190e` |
+| `+0x04` | i32 | bookkeeping slot (`-1` = unset) — cleared by `FUN_1014d1954` |
+| `+0x10` | weak ref | VM thread that produced the value (set once) |
+| `+0x18` | i32 | **materialization slot** (`-1` until the body returned; then the result index) — read by `FUN_1014d18fa` |
+| `+0x08` | weak ref | reader-waiter list head — released by `FUN_1014d14ac` |
+
+### Who writes the state (resolved)
+
+- **`FUN_1014d19c4(record, kind)`** → state := **2**, sub-kind := `kind`
+  (0 load error / 1 not-one-value), then releases the waiter list
+  (`FUN_1014d14ac`).
+- **`FUN_1014d19d6(record, thread, slot)`** → state := **3**, stores the
+  producing VM thread weak-ref at `+0x10` (if empty) and the **result stack
+  index** at `+0x18`.
+- **`FUN_101593d13`** = the telemetry-armed wrapper: optional `require`
+  push/repair, then `FUN_1014d19d6`, then `FUN_1014d1954` (clears the export
+  bookkeeping).
+- **`FUN_101593956(ctx, script, key, record, L, status)`** = the single
+  post-run funnel:
+  - `status == 0`, thread stack has exactly 1 value (`FUN_1029856ff(L)==1`)
+    → `FUN_101593d13`/`FUN_1014d19d6` (materializing, slot = top index);
+  - `status == 0` otherwise → `FUN_1014d19c4(record, 1)` ("not one value");
+  - `status` ∉ {0,1,6} → `FUN_1014d19c4(record, 0)` ("load error") plus the
+    `FUN_101552990` notification;
+  - `status == 1 | 6` (yielded) → installs a **continuation object**
+    (`0x60` bytes, two polymorphic continuations from
+    `PTR_FUN_1071bad10`/`1071bad90`) at `*(L->vmidentity + 0x78)` (the list
+    at `FUN_10298877e(L)+0x78`) so the module finishes later and the funnel
+    runs again.
+
+So the earlier "who moves a module 3 → 1/2" question was mis-shaped: the
+executor **never writes 1**. `1` (ready) is only the *reader's* first
+observation of `state == 3` with `+0x18 != -1`; every write after creation
+goes through the two helpers above. The write = `2` paths are exhaustive
+(error/not-one-value); the not-yet-materialized form is `3` with slot `-1`.
+
 Per-VM module state (tracked via `FUN_10158eb34`/`FUN_1014d19f8`), states:
 
 | State | Meaning | Behavior on require |
@@ -300,17 +345,21 @@ Additional rules verified in the entry path:
   script-execution notes traced the facet state machine `0x101545276`,
   which moves the `+0x12a0` counter through `1 -> 2 -> 3` during
   destruction (destroying the sub-context at `+0x180`, then closing the
-  facet). This confirms the gates' polarity: `>= 3` means destroyed, so
-  the fatal `"Invalid Facet Access"` on access is by design, not a bug in
+  facet); the machine is also stricter than a plain counter — if it
+  observes a value `> 2` mid-transition it raises the same fatal
+  `"Invalid Facet Access"`. This confirms the gates' polarity: `>= 3`
+  means destroyed, so the fatal on access is by design, not a bug in
   our reading. A second accessor with the same shape exists at
   `0x1055d5e74` (returns `context+0xdc0` while the phase is below 3) —
   a different facet object gated on the same destruction state machine.
-  The `+0xa18` counter's writer is presumably the same state-machine
-  family, not yet individually confirmed.
+  The ScriptContext-side `+0xa18` counter is written by the same family
+  (mirrored teardown), but its individual writer function was not named.
 - The **identity getters** (vtable `+0x2c0`/`+0x2c8`) and the `DAT_10752bfe8`
   "new mode" pair variant were not followed into the implementing classes.
-- `require`'s state transitions during a *run* (who moves a module 3 → 1/2)
-  live in the truncated middle of `sub_10158dd88` and its helpers
-  (`FUN_10158ec34`) — state *reads* are fully verified, the write sites are not.
+- ~~`require`'s state transitions during a *run*...~~ **Resolved:** all
+  post-creation writes go through `FUN_1014d19c4` (state 2) and
+  `FUN_1014d19d6`/`FUN_101593d13` (state 3 + result slot); `FUN_101593956`
+  selects between them and installs the yield continuation
+  (`*(identity+0x78)`). See the table above.
 - The exact meaning of slot `[7]` (argcount vs nresults) in
   `ScriptContextResume` is inferred from the `lua_resume(L, 0, n)` call shape.

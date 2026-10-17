@@ -176,6 +176,19 @@ constexpr size_t gclist    = 0x28;
 constexpr size_t total_size = 0x30;
 } // namespace Table_
 
+// ---------------- Udata (Lua userdata; size 0x10 + payload) ----------------
+namespace Udata_ {
+constexpr size_t tt          = 0x00; // tt/marked/memcat
+constexpr size_t tag         = 0x03; // u8 userdata tag
+constexpr size_t len         = 0x04; // u32 payload length
+constexpr size_t metatable   = 0x08; // Enc::Add (VMValue4): real = stored + (u+8)
+constexpr size_t data        = 0x10; // payload follows the header
+// Evidence: the builtin fast-path impl at 0x10298f40a (getmetatable-shaped)
+// reads, per type: tag 7 (table) -> [t+0x20]; tag 9 (userdata) ->
+// LEA r,[u+8]; ADD r,[u+8]; everything else -> global->mt[tag]
+// (global+0x328+tag*8). luaM_newgco sizes len + 0x10.
+} // namespace Udata_
+
 } // namespace offs
 
 // Compile-time sanity anchors for the offset tables (self-checks, not claims

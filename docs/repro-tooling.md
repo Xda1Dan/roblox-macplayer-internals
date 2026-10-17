@@ -20,6 +20,7 @@
 | ScriptContext state machines (resume guard, admission, `require`) | done, tested — guard exact; admission polarity corrected (0 = allowed, 1 = blocked; no predicate is fail-closed); `require` is a behavioral model |
 | RakNet datagram AEAD (ChaCha20-Poly1305, custom framing) | done, tested — RFC 8439 primitive vectors + an independent known-answer vector; the 4-byte nonce suffix is documented as unused by the primitives |
 | LBC serialized-chunk reader + constant-aware disassembly | done, tested — cross-checked against the reference loader; header-only opcode conversion (AUX words untouched) |
+| `luau_load`-equivalent loader (wire→vmop rewrite, atom pass, closure tree) | **done, tested** (`src/loader.cpp`) — canonical and wire inputs produce identical VMOP code + disassembly |
 | SigGuard bytecode auth (mode chain, SHA-256, table MAC) | done, tested — packed table fixture from the binary; MAC cross-checked against an independent Python transcription |
 | Binary audit (`rbxaudit`) | done — re-checks the target's tables, dispatch handlers, SigGuard blob, checksum code, and gate call site |
 | `luau_load`-equivalent loader, interpreter core | planned |

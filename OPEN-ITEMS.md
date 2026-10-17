@@ -9,22 +9,35 @@ this repository; unchecked boxes are genuinely open.
 - [ ] **Path A interpreter** (`0x1029adfe9`) does not decompile cleanly
   ("backward normalization not implemented"); only the dispatch table and
   handler addresses are verified. Handler-by-handler assembly review remains.
-- [ ] **Userdata `metatable`** read site — the VMValue4 scheme is consistent
-  with the other fields, but the individual accessor was not isolated.
-- [ ] **`CallInfo+0x28`** — read as `nresults`; whether it packs additional
-  state is unconfirmed.
-- [ ] **Alternate container branch** `FUN_1014b96b3` (taken when
-  `DAT_10752c0a0 != 0`) — not analyzed.
+- [x] **Userdata `metatable` read site** — located: `Udata+0x08`,
+  Add-encoded (`real = stored + (u+8)`); read per type in the builtin
+  fast path `0x10298f40a` (tag 7 → `[t+0x20]`, tag 9 → the encoded field,
+  else `global->mt[tag]`). Mirrored in `layouts.hpp` (`Udata_`).
+- [x] **`CallInfo+0x28`** — resolved: a 32-bit `nresults` dword
+  (`MOV dword [ci+0x28], ecx` with `ecx = ~(int)nargs >> 1`, the
+  MULTRET convention), written by the call helper `0x1029adc1a`; no
+  packing. Bonus: the same function re-confirms the `nCcalls` guard
+  (`word [L+0x58]`, limit `0xc8` = 200).
+- [x] **Alternate container branch** `FUN_1014b96b3` — resolved: a
+  flag-gated (`DAT_10752c0a0`) *pure* string→string decode of the same
+  RSB1 pipeline; never calls `LuaVMLoad`; returns `{payload, ok}`.
+  Wrapped by `FUN_1014b969b`.
 - [x] **`FUN_1014bb465` integrity gate** — fully deobfuscated as SigGuard;
   mode chain, SHA-256 digest, table MAC, verdict mapping, and bit-30 clear
   are documented in `luau-load.md` §3.2 and reproduced in
   `vm-repro/src/sigguard.cpp`.
-- [ ] **Roblox-added builtins** ids 54–59 (impls `0x10298f1cf`–`0x10298f3b3`)
-  — names unidentified.
+- [x] **Roblox-added builtins 54–59** — closed as *not a thing*: the
+  FASTCALL table (`0x1072d74e0`) has ids **1..196**; ids 1..132 are exactly
+  the upstream 0.742 `LBF_*` set (each with a distinct impl in
+  `0x10298dd90..0x102990f57`), and ids **133..196 all share one stub**
+  (`0x102990fa7`, returns -1 → slow path). The old "ids 54–59" reading
+  stopped reading the table too early.
 - [ ] **Type tag 5** (`LUA_TVECTOR`) semantics in this build — the tag is
   known; the exact handler set for vector arithmetic is not fully walked.
 - [ ] **`+0xa18` phase-counter writer** — same state-machine family as
-  `+0x12a0`, not individually confirmed.
+  `+0x12a0`; the **lane** machine is proven (`sub_101545276`: 1→2→3 with a
+  fatal if `>2` is observed mid-transition); the ScriptContext-side writer
+  function itself was not individually named.
 
 ## 2. ScriptContext layer
 
@@ -33,11 +46,16 @@ this repository; unchecked boxes are genuinely open.
   now mirrors `FUN_10144ef5e` exactly and the second `DAT_10752c840` window.
 - [x] **Require cross-context** — both directions implemented; the outer
   `FUN_101543e94` skip byte and the name-property bit-8 check are documented.
+- [x] **`require` write sites** — resolved (see `scriptcontext.md`):
+  `FUN_101593956` funnels every post-run outcome into
+  `FUN_1014d19c4` (state 2 + sub-kind) or `FUN_1014d19d6`/`FUN_101593d13`
+  (state 3 + result slot); yields install a continuation at
+  `*(identity+0x78)`. ModuleRecord layout recovered.
 - [ ] **Identity getters** (vtable `+0x2c0`/`+0x2c8`) and the
   `DAT_10752bfe8` pair variant — not followed into implementing classes.
-- [ ] **`require` write sites** — state reads verified; who moves a module
-  3 → 1/2 in `sub_10158dd88` / `FUN_10158ec34` is not traced.
-- [ ] **`ScriptContextResume` slot `[7]`** — argcount vs nresults inferred.
+- [ ] **`ScriptContextResume` slot `[7]`** — used as the argument count of
+  `lua_resume(L, 0, nargs)` (negative = MULTRET, seen in the call helper
+  `0x1029adc1a`); whether anything else reads it as `nresults` unconfirmed.
 - [ ] **ScriptContext construction call-site** — operator-new size and the
   facet-constructor caller still unmapped.
 - [ ] **GC tunables application point** — `LuauGcGoal*`, `LuauGcStepMul`,
@@ -74,11 +92,16 @@ this repository; unchecked boxes are genuinely open.
   `BytecodeBuilder::dumpInstruction`.
 - [x] AEAD poly-key state corrected (8-byte nonce; suffix unused).
 - [x] ScriptContext admission/require models corrected.
-- [ ] `luau_load`-equivalent loader (Proto/Closure construction).
+- [x] **`luau_load`-equivalent loader** (`src/loader.cpp`): version gates,
+  per-proto wire→vmop rewrite, atom pass (hook injectable), line/debug/
+  feedback fields, main-proto closure; round-trips canonical and wire
+  inputs to identical VMOP code + disassembly.
 - [ ] Interpreter core (Path B first).
 - [ ] Machine-code differential test for the AEAD primitives (the xxHash32
   test already executes the binary's own code; AEAD currently uses an
   independent model + RFC vectors).
+- [ ] IMPORT constant evaluation against a synthetic environment (the
+  loader keeps import ids; resolution needs the embedder's `_G`).
 
 ## Notes
 

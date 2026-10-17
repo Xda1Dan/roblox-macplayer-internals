@@ -613,6 +613,53 @@ Dispatch = `jmp [table + opbyte*8]`; handlers tail-jump to the next handler
 
 ---
 
+## `Udata` (Lua userdata) — resolved
+
+The community dump's "+0x10, VMValue4" guess was close but off: the field
+lives at `Udata+0x08`. Verified from the builtin fast-path implementation at
+`0x10298f40a` (reads bytes `CMP tag==9` → `LEA r14,[u+8]; ADD r14,[u+8]`):
+
+| Off | Field | Notes |
+|-----|-------|-------|
+| `+0x00` | `tt, marked, memcat` | GC header (3 bytes) |
+| `+0x03` | `tag` (u8) | userdata tag |
+| `+0x04` | `len` (u32) | payload length |
+| `+0x08` | `metatable` | **Enc::Add (VMValue4)**: `real = stored + (u+8)` |
+| `+0x10` | `data[]` | payload |
+
+The same builtin shows the metatable read for every type: tag 7 (table) →
+`[t+0x20]` (plain); tag 9 (userdata) → the Add-encoded `u+8`; everything else
+→ `global->mt[tag]` at `global+0x328+tag*8`.
+
+## `CallInfo+0x28` — resolved (32-bit, no packing)
+
+The built-in call helper (`0x1029adc1a`) writes `nresults` as a **dword**:
+`MOV dword ptr [ci+0x28], ecx` where `ecx = ~(int)nargs >> 1` — the
+negative-`nargs`-means-MULTRET convention, stored in 32 bits. It also
+zeroes `ci->flags` (`dword [ci+0x2c]`) and `ci->savedpc` (`qword [ci+0x20]`),
+and gives a second confirmation of the guard: `nCcalls` (`word [L+0x58]`,
+limit `0xc8` = 200). No extra state lives in `+0x28`.
+
+## The alternate container decoder branch — resolved
+
+`FUN_1014b96b3` (taken by the container decoder when `DAT_10752c0a0 != 0`,
+wrapped by `FUN_1014b969b`) is not a different format: it is the same RSB1
+pipeline expressed as a **pure string→string decoder**. Differences from the
+main path (`FUN_1014b91b5`):
+
+- input/output are `std::string`s (Apple SSO layout handled inline);
+- the plain-bytecode magic is rewritten to `"RSB1"+0` and zstd/size-0
+  decoding proceeds as usual;
+- checksum-vs-key and zstd use the same helpers (`FUN_103222533` seed
+  `0x2A`, `FUN_1032844e2`);
+- it **never calls `LuaVMLoad`** — it returns `{payload:string, ok:bool}`
+  and lets the caller decide what to do with the bytes.
+
+So the flag selects "decode only" vs "decode + load"; the wire format is
+identical either way.
+
+---
+
 ## `task.*` library
 
 Registered by `task_lib_init` (`0x1014cebe0`). These are the corrected addresses (the community
@@ -637,11 +684,16 @@ current or dead thread (`cannot cancel thread`), else `lua_resetthread` or sched
 ## Unknowns (kept honest)
 
 - **Path A interpreter** (`0x1029adfe9`) does not decompile; treated as assembly-only.
-- **Userdata `metatable`** is taken as VMValue4 by the community dump and is consistent with the
-  other VMValue4 fields, but the individual read site was not isolated.
-- **`ci+0x28`** is read as `nresults`; whether it packs additional state is unconfirmed.
-- **Alternate decoder branch** (`FUN_1014b96b3`, taken when `DAT_10752c0a0 != 0`) not yet
-  analyzed; the main paths above are fully characterized.
+- ~~**Userdata `metatable`**...~~ **Resolved:** `Udata+0x08`, Add-encoded
+  (`real = stored + (u+8)`) — verified from the builtin fast path
+  `0x10298f40a` (see the `Udata` section above).
+- ~~**`ci+0x28`**...~~ **Resolved:** a plain 32-bit `nresults` (dword store in
+  the call helper `0x1029adc1a`); no packing.
+- ~~**Alternate decoder branch**...~~ **Resolved:** a flag-gated string→string
+  decode of the same RSB1 pipeline (no load); see the section above.
+- ~~**Roblox-added builtins 54–59**...~~ **Resolved (no such thing):** the
+  FASTCALL table is ids 1..132 = the upstream 0.742 set with distinct impls,
+  and ids 133..196 are one shared "decline fast path" stub (`0x102990fa7`).
 - ~~**`FUN_1014bb465`** is characterized functionally...~~ **Resolved:** the gate is
   SigGuard (mode chain + SHA-256 + table MAC); see `luau-load.md` §3.2 and the
   `sigguard` reproduction. Verdict mapping accepts codes 0/1/2 and rejects 3..9;
